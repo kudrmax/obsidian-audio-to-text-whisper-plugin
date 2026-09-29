@@ -38,7 +38,7 @@ export class FakeVault implements VaultGateway {
 	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
 		return [...this.notes.entries()]
 			.filter(([path]) => folders.some((f) => path.startsWith(`${f}/`)))
-			.filter(([, note]) => tags.length === 0 || note.tags.some((t) => tags.includes(t)))
+			.filter(([, note]) => note.tags.some((t) => tags.includes(t)))
 			.map(([path]) => path);
 	}
 

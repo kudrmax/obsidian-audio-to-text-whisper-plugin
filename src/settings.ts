@@ -12,7 +12,7 @@ export interface TranscriberSettings {
 
 export const DEFAULT_SETTINGS: TranscriberSettings = {
 	folders: [],
-	tags: [],
+	tags: ["transcribe"],
 	engine: "whisper.cpp",
 	whisperPath: "",
 	ffmpegPath: "",

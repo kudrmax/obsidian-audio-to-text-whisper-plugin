@@ -23,8 +23,8 @@ export class SettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Теги (необязательно)")
-			.setDesc("По одному на строку, без #. Обрабатываются заметки с любым из тегов. Пусто — всё аудио в указанных папках.")
+			.setName("Теги")
+			.setDesc("По одному на строку, без #. Обрабатываются только заметки с любым из этих тегов. Хотя бы один тег обязателен.")
 			.addTextArea((text) =>
 				text
 					.setPlaceholder("transcribe")

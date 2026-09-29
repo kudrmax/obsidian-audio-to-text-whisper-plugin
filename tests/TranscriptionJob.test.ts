@@ -44,19 +44,12 @@ describe("TranscriptionJob", () => {
 		expect(vault.trashed).toEqual([]);
 	});
 
-	it("processes every note in configured folders when no tags are set", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addAudio("att/b.webm")
-			.addNote("Inbox/untagged.md", "![[a.webm]]")
-			.addNote("Inbox/Sub/other.md", "![[b.webm]]", ["other"])
-			.addNote("Elsewhere/n.md", "![[a.webm]]");
+	it("refuses to run without tags", async () => {
+		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
 
-		const report = await job().run({ folders: ["Inbox"], tags: [] }, new AbortController().signal);
-
-		expect(report.total).toBe(2);
-		expect(vault.content("Inbox/untagged.md")).toBe("text of a");
-		expect(vault.content("Inbox/Sub/other.md")).toBe("text of b");
+		await expect(job().run({ folders: ["Inbox"], tags: [] }, new AbortController().signal)).rejects.toThrow("тег");
+		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
+		expect(transcriber.calls).toEqual([]);
 	});
 
 	it("matches notes having any of the configured tags", async () => {
@@ -90,7 +83,7 @@ describe("TranscriptionJob", () => {
 	it("refuses to run without folders", async () => {
 		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
 
-		await expect(job().run({ folders: [], tags: [] }, new AbortController().signal)).rejects.toThrow("папки");
+		await expect(job().run({ folders: [], tags: ["transcribe"] }, new AbortController().signal)).rejects.toThrow("папки");
 		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
 	});
 

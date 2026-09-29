@@ -13,7 +13,7 @@ export class ObsidianVaultGateway implements VaultGateway {
 		return this.app.vault
 			.getMarkdownFiles()
 			.filter((file) => prefixes.some((p) => p === "/" || file.path.startsWith(`${p}/`)))
-			.filter((file) => wanted.size === 0 || this.tagsOf(file).some((t) => wanted.has(t)))
+			.filter((file) => this.tagsOf(file).some((t) => wanted.has(t)))
 			.map((file) => file.path);
 	}
 

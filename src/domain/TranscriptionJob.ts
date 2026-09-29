@@ -34,6 +34,9 @@ export class TranscriptionJob {
 		if (options.folders.length === 0) {
 			throw new Error("не указаны папки для поиска аудио");
 		}
+		if (options.tags.length === 0) {
+			throw new Error("не указан ни один тег: распознаются только заметки с тегом");
+		}
 		const recoveredDeletions = await this.completePendingDeletions();
 		const tasks = this.collectTasks(options);
 		const failures: TaskFailure[] = [];
