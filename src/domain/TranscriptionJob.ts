@@ -1,3 +1,5 @@
+import { InlineTags } from "./InlineTags";
+import { TaggedAudioLines } from "./TaggedAudioLines";
 import {
 	DeletionJournal,
 	JobReport,
@@ -17,6 +19,7 @@ export interface JobOptions {
 class CancelledError extends Error {}
 
 /**
+ * Only audio references with a tag on the same line are processed.
  * Per-audio order is what makes a run safe to interrupt at any point:
  * transcribe → journal the pending deletion → replace embed in note → trash orphaned audio → clear journal.
  * The audio is trashed only when nothing references it anymore, so it can never be lost before its text is saved.
@@ -35,15 +38,16 @@ export class TranscriptionJob {
 		if (options.folders.length === 0) {
 			throw new Error("не указаны папки для поиска аудио");
 		}
-		if (options.tags.length === 0) {
-			throw new Error("не указан ни один тег: распознаются только заметки с тегом");
+		const tags = new InlineTags(options.tags);
+		if (tags.isEmpty) {
+			throw new Error("не указан ни один тег: распознаётся только аудио с тегом");
 		}
+		const lines = new TaggedAudioLines(tags, options.removeTagsAfter);
 		const recoveredDeletions = await this.completePendingDeletions();
-		const tasks = this.collectTasks(options);
+		const tasks = await this.collectTasks(options, lines);
 		const failures: TaskFailure[] = [];
 		let done = 0;
 		let cancelled = false;
-		let noteFailed = false;
 
 		this.progress.onStart(tasks.length);
 		for (const [index, task] of tasks.entries()) {
@@ -53,7 +57,7 @@ export class TranscriptionJob {
 			}
 			this.progress.onTaskStart(index, tasks.length, task);
 			try {
-				await this.process(task, signal);
+				await this.process(task, lines, signal);
 				done++;
 				this.progress.onTaskEnd(index, tasks.length, task);
 			} catch (error) {
@@ -62,18 +66,9 @@ export class TranscriptionJob {
 					this.progress.onTaskEnd(index, tasks.length, task, "отменено");
 					break;
 				}
-				noteFailed = true;
 				const message = error instanceof Error ? error.message : String(error);
 				failures.push({ task, message });
 				this.progress.onTaskEnd(index, tasks.length, task, message);
-			}
-
-			const noteFinished = tasks[index + 1]?.notePath !== task.notePath;
-			if (noteFinished) {
-				if (!noteFailed && options.removeTagsAfter) {
-					await this.removeTags(task, options.tags, failures);
-				}
-				noteFailed = false;
 			}
 		}
 
@@ -82,21 +77,13 @@ export class TranscriptionJob {
 		return report;
 	}
 
-	private async removeTags(task: TranscriptionTask, tags: readonly string[], failures: TaskFailure[]): Promise<void> {
-		try {
-			await this.vault.removeTags(task.notePath, tags);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			failures.push({ task, message: `текст вставлен, но тег не удалён: ${message}` });
-		}
-	}
-
-	private collectTasks(options: JobOptions): TranscriptionTask[] {
+	private async collectTasks(options: JobOptions, lines: TaggedAudioLines): Promise<TranscriptionTask[]> {
 		const tasks: TranscriptionTask[] = [];
 		for (const notePath of this.vault.findNotes(options.folders, options.tags)) {
+			const content = (await this.vault.readNote(notePath)) ?? "";
 			const seen = new Set<string>();
 			for (const embed of this.vault.findAudioEmbeds(notePath)) {
-				if (seen.has(embed.linkText)) continue;
+				if (seen.has(embed.linkText) || !lines.contains(content, embed.linkText)) continue;
 				seen.add(embed.linkText);
 				tasks.push({ notePath, embed });
 			}
@@ -104,7 +91,7 @@ export class TranscriptionJob {
 		return tasks;
 	}
 
-	private async process(task: TranscriptionTask, signal: AbortSignal): Promise<void> {
+	private async process(task: TranscriptionTask, lines: TaggedAudioLines, signal: AbortSignal): Promise<void> {
 		const { audioPath, linkText } = task.embed;
 		if (!this.vault.exists(audioPath)) {
 			throw new Error(`аудиофайл не найден: ${audioPath}`);
@@ -114,10 +101,15 @@ export class TranscriptionJob {
 		if (signal.aborted) throw new CancelledError();
 
 		await this.journal.add({ audioPath, notePath: task.notePath, transcript: text });
-		const replaced = await this.vault.replaceInNote(task.notePath, linkText, text);
+		let replaced = false;
+		await this.vault.editNote(task.notePath, (content) => {
+			const updated = lines.replace(content, linkText, text);
+			replaced = updated !== content;
+			return updated;
+		});
 		if (!replaced) {
 			await this.journal.remove(audioPath);
-			throw new Error(`ссылка ${linkText} не найдена в заметке, текст не вставлен`);
+			throw new Error(`строка с ${linkText} и тегом не найдена: заметку изменили во время распознавания, аудио сохранено`);
 		}
 		await this.trashIfOrphaned(audioPath);
 	}
@@ -137,7 +129,7 @@ export class TranscriptionJob {
 	private async completePendingDeletions(): Promise<number> {
 		let trashed = 0;
 		for (const entry of this.journal.list()) {
-			const textSaved = await this.vault.noteContains(entry.notePath, entry.transcript);
+			const textSaved = (await this.vault.readNote(entry.notePath))?.includes(entry.transcript) ?? false;
 			if (!textSaved) {
 				await this.journal.remove(entry.audioPath);
 				continue;

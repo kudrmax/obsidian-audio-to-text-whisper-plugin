@@ -13,11 +13,11 @@ export interface VaultGateway {
 	findAudioEmbeds(notePath: string): AudioEmbed[];
 	exists(path: string): boolean;
 	absolutePath(path: string): string;
-	replaceInNote(notePath: string, search: string, replacement: string): Promise<boolean>;
-	noteContains(notePath: string, text: string): Promise<boolean>;
+	readNote(notePath: string): Promise<string | undefined>;
+	/** Atomic read-modify-write against the note's current content. */
+	editNote(notePath: string, edit: (content: string) => string): Promise<void>;
 	isReferenced(audioPath: string): Promise<boolean>;
 	trash(path: string): Promise<void>;
-	removeTags(notePath: string, tags: readonly string[]): Promise<void>;
 }
 
 export interface Transcriber {

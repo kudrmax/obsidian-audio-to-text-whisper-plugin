@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { TranscriptionJob } from "../src/domain/TranscriptionJob";
+import { JobOptions, TranscriptionJob } from "../src/domain/TranscriptionJob";
 import { FakeTranscriber, FakeVault, MemoryJournal, RecordingProgress } from "./fakes";
 
-const OPTIONS = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
+const OPTIONS: JobOptions = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
 
 describe("TranscriptionJob", () => {
 	let vault: FakeVault;
@@ -10,8 +10,8 @@ describe("TranscriptionJob", () => {
 	let journal: MemoryJournal;
 	let progress: RecordingProgress;
 
-	const job = () => new TranscriptionJob(vault, transcriber, journal, progress);
-	const run = (signal = new AbortController().signal) => job().run(OPTIONS, signal);
+	const run = (options: Partial<JobOptions> = {}, signal = new AbortController().signal) =>
+		new TranscriptionJob(vault, transcriber, journal, progress).run({ ...OPTIONS, ...options }, signal);
 
 	beforeEach(() => {
 		vault = new FakeVault();
@@ -20,238 +20,247 @@ describe("TranscriptionJob", () => {
 		progress = new RecordingProgress();
 	});
 
-	it("replaces embedded audio with transcript and trashes the audio", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "before\n![[a.webm]]\nafter", ["transcribe"]);
+	describe("selection", () => {
+		it("processes only audio with the tag on the same line", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addAudio("att/old.webm")
+				.addNote("Inbox/n.md", "- ![[old.webm]]\n- ![[a.webm]] #transcribe");
 
-		const report = await run();
+			const report = await run();
 
-		expect(vault.content("Inbox/n.md")).toBe("before\ntext of a\nafter");
-		expect(vault.trashed).toEqual(["att/a.webm"]);
-		expect(journal.list()).toEqual([]);
-		expect(report).toMatchObject({ total: 1, done: 1, failures: [], cancelled: false });
-		expect(progress.events).toEqual(["start 1", "task 1/1", "end 1/1"]);
+			expect(report.total).toBe(1);
+			expect(vault.content("Inbox/n.md")).toBe("- ![[old.webm]]\n- text of a #transcribe");
+			expect(vault.audio.has("att/old.webm")).toBe(true);
+		});
+
+		it("ignores tagged audio outside configured folders", async () => {
+			vault.addAudio("att/a.webm").addNote("Elsewhere/n.md", "![[a.webm]] #transcribe");
+
+			expect((await run()).total).toBe(0);
+		});
+
+		it("accepts any of the configured tags", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addAudio("att/b.webm")
+				.addAudio("att/c.webm")
+				.addNote("Inbox/n.md", "![[a.webm]] #voice\n![[b.webm]] #transcribe\n![[c.webm]] #other");
+
+			const report = await run({ tags: ["voice", "transcribe"] });
+
+			expect(report.total).toBe(2);
+			expect(vault.content("Inbox/n.md")).toContain("![[c.webm]] #other");
+		});
+
+		it("handles embeds and plain links to the same audio independently of each other", async () => {
+			vault
+				.addAudio("All files/rec.m4a")
+				.addNote("Inbox/n.md", "- [[All files/rec.m4a]] #transcribe\n- ![[All files/rec.m4a]] #transcribe");
+
+			const report = await run();
+
+			expect(report).toMatchObject({ total: 2, done: 2 });
+			expect(vault.content("Inbox/n.md")).toBe("- text of rec #transcribe\n- text of rec #transcribe");
+			expect(transcriber.calls).toHaveLength(1);
+			expect(vault.trashed).toEqual(["All files/rec.m4a"]);
+		});
+
+		it("refuses to run without tags or folders", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+
+			await expect(run({ tags: [] })).rejects.toThrow("тег");
+			await expect(run({ folders: [] })).rejects.toThrow("папки");
+			expect(transcriber.calls).toEqual([]);
+		});
 	});
 
-	it("ignores notes without the tag or outside configured folders", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addNote("Inbox/untagged.md", "![[a.webm]]", ["other"])
-			.addNote("Elsewhere/tagged.md", "![[a.webm]]", ["transcribe"]);
+	describe("replacement", () => {
+		it("replaces the audio with its transcript and trashes the audio", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "before\n![[a.webm]] #transcribe\nafter");
 
-		const report = await run();
+			const report = await run();
 
-		expect(report.total).toBe(0);
-		expect(vault.trashed).toEqual([]);
+			expect(vault.content("Inbox/n.md")).toBe("before\ntext of a #transcribe\nafter");
+			expect(vault.trashed).toEqual(["att/a.webm"]);
+			expect(journal.list()).toEqual([]);
+			expect(report).toMatchObject({ total: 1, done: 1, failures: [], cancelled: false });
+			expect(progress.events).toEqual(["start 1", "task 1/1", "end 1/1"]);
+		});
+
+		it("removes the tag from the transcribed line only", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addAudio("att/b.webm")
+				.addNote("Inbox/n.md", "- ![[a.webm]] #transcribe\n- idea #transcribe\n- ![[b.webm]] #transcribe");
+			transcriber.failFor("/vault/att/b.webm");
+
+			await run({ removeTagsAfter: true });
+
+			expect(vault.content("Inbox/n.md")).toBe("- text of a\n- idea #transcribe\n- ![[b.webm]] #transcribe");
+		});
+
+		it("leaves an untagged reference to the same audio intact and keeps the audio", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe\nsee ![[a.webm]]");
+
+			await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe\nsee ![[a.webm]]");
+			expect(vault.trashed).toEqual([]);
+		});
+
+		it("does not trash audio still referenced by another note", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addNote("Inbox/n.md", "![[a.webm]] #transcribe")
+				.addNote("Other/ref.md", "see [[a.webm]]");
+
+			await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe");
+			expect(vault.trashed).toEqual([]);
+			expect(journal.list()).toEqual([]);
+		});
+
+		it("transcribes audio shared by two notes once and trashes it after the last one", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addNote("Inbox/one.md", "![[a.webm]] #transcribe")
+				.addNote("Inbox/two.md", "x ![[a.webm]] #transcribe");
+
+			await run({ removeTagsAfter: true });
+
+			expect(transcriber.calls).toEqual(["/vault/att/a.webm"]);
+			expect(vault.content("Inbox/one.md")).toBe("text of a");
+			expect(vault.content("Inbox/two.md")).toBe("x text of a");
+			expect(vault.trashed).toEqual(["att/a.webm"]);
+		});
+
+		it("is idempotent: a second run has nothing to do", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+
+			await run();
+			const second = await run();
+
+			expect(second.total).toBe(0);
+			expect(transcriber.calls).toHaveLength(1);
+		});
 	});
 
-	it("refuses to run without tags", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
+	describe("failures", () => {
+		it("keeps note and audio untouched when whisper fails", async () => {
+			transcriber.failFor("/vault/att/a.webm");
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
 
-		await expect(job().run({ ...OPTIONS, tags: [] }, new AbortController().signal)).rejects.toThrow("тег");
-		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
-		expect(transcriber.calls).toEqual([]);
+			const report = await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]] #transcribe");
+			expect(vault.audio.has("att/a.webm")).toBe(true);
+			expect(report.failures).toHaveLength(1);
+			expect(journal.list()).toEqual([]);
+		});
+
+		it("keeps audio when transcript is empty", async () => {
+			transcriber = new FakeTranscriber({ "/vault/att/a.webm": "  \n " });
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+
+			const report = await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]] #transcribe");
+			expect(report.failures).toHaveLength(1);
+		});
+
+		it("keeps audio when the tagged line was edited during transcription", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe\nother");
+			vault.editDuringTranscription = (content) => content.replace(" #transcribe", "");
+
+			const report = await run();
+
+			expect(report.failures[0].message).toContain("изменили во время распознавания");
+			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]\nother");
+			expect(vault.audio.has("att/a.webm")).toBe(true);
+			expect(journal.list()).toEqual([]);
+		});
+
+		it("keeps edits made elsewhere in the note during transcription", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe\nother");
+			vault.editDuringTranscription = (content) => content.replace("other", "edited");
+
+			await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe\nedited");
+		});
+
+		it("reports a missing audio file", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+			const embeds = vault.findAudioEmbeds("Inbox/n.md");
+			vault.audio.clear();
+			vault.findAudioEmbeds = () => embeds;
+
+			const report = await run();
+
+			expect(report.failures[0].message).toContain("не найден");
+			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]] #transcribe");
+		});
+
+		it("stops on cancellation without touching remaining audio", async () => {
+			vault
+				.addAudio("att/a.webm")
+				.addAudio("att/b.webm")
+				.addNote("Inbox/n.md", "![[a.webm]] #transcribe\n![[b.webm]] #transcribe");
+			const controller = new AbortController();
+			progress.onTaskEnd = () => controller.abort();
+
+			const report = await run({}, controller.signal);
+
+			expect(report).toMatchObject({ total: 2, done: 1, cancelled: true });
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe\n![[b.webm]] #transcribe");
+			expect(vault.audio.has("att/b.webm")).toBe(true);
+		});
 	});
 
-	it("matches notes having any of the configured tags", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addAudio("att/b.webm")
-			.addAudio("att/c.webm")
-			.addNote("Inbox/one.md", "![[a.webm]]", ["voice"])
-			.addNote("Inbox/two.md", "![[b.webm]]", ["transcribe"])
-			.addNote("Inbox/three.md", "![[c.webm]]", ["other"]);
+	describe("crash recovery", () => {
+		it("trashes audio left after a crash between saving text and trashing", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+			vault.failOnTrash = true;
+			await run();
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe");
+			expect(vault.audio.has("att/a.webm")).toBe(true);
 
-		const report = await job().run({ ...OPTIONS, tags: ["voice", "transcribe"] }, new AbortController().signal);
+			vault.failOnTrash = false;
+			const report = await run();
 
-		expect(report.total).toBe(2);
-		expect(vault.content("Inbox/three.md")).toBe("![[c.webm]]");
-	});
+			expect(report.recoveredDeletions).toBe(1);
+			expect(vault.trashed).toEqual(["att/a.webm"]);
+			expect(journal.list()).toEqual([]);
+		});
 
-	it("replaces both embeds and plain links to the same audio", async () => {
-		vault
-			.addAudio("All files/rec.m4a")
-			.addNote("Inbox/n.md", "[[All files/rec.m4a]]\n![[All files/rec.m4a]]", ["transcribe"]);
+		it("never trashes audio whose text was not saved", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+			vault.failOnEdit = true;
+			await run();
+			expect(journal.list()).toHaveLength(1);
 
-		const report = await run();
+			vault.failOnEdit = false;
+			vault.notes.get("Inbox/n.md")!.content = "user removed the link";
+			const report = await run();
 
-		expect(report).toMatchObject({ total: 2, done: 2 });
-		expect(vault.content("Inbox/n.md")).toBe("text of rec\ntext of rec");
-		expect(transcriber.calls).toHaveLength(1);
-		expect(vault.trashed).toEqual(["All files/rec.m4a"]);
-	});
+			expect(report.recoveredDeletions).toBe(0);
+			expect(vault.audio.has("att/a.webm")).toBe(true);
+			expect(journal.list()).toEqual([]);
+		});
 
-	it("removes the tag once every audio in the note is transcribed", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addAudio("att/b.webm")
-			.addNote("Inbox/n.md", "- ![[a.webm]] #transcribe\n- ![[b.webm]] #transcribe", ["transcribe"]);
+		it("reprocesses audio after a crash before saving text", async () => {
+			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
+			vault.failOnEdit = true;
+			await run();
 
-		await job().run({ ...OPTIONS, removeTagsAfter: true }, new AbortController().signal);
+			vault.failOnEdit = false;
+			const report = await run();
 
-		expect(vault.content("Inbox/n.md")).toBe("- text of a\n- text of b");
-		expect(vault.findNotes(["Inbox"], ["transcribe"])).toEqual([]);
-	});
-
-	it("keeps the tag when the setting is off", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe", ["transcribe"]);
-
-		await run();
-
-		expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe");
-	});
-
-	it("keeps the tag when some audio in the note failed", async () => {
-		transcriber.failFor("/vault/att/b.webm");
-		vault
-			.addAudio("att/a.webm")
-			.addAudio("att/b.webm")
-			.addNote("Inbox/n.md", "![[a.webm]] ![[b.webm]] #transcribe", ["transcribe"])
-			.addAudio("att/c.webm")
-			.addNote("Inbox/other.md", "![[c.webm]] #transcribe", ["transcribe"]);
-
-		await job().run({ ...OPTIONS, removeTagsAfter: true }, new AbortController().signal);
-
-		expect(vault.content("Inbox/n.md")).toBe("text of a ![[b.webm]] #transcribe");
-		expect(vault.content("Inbox/other.md")).toBe("text of c");
-	});
-
-	it("refuses to run without folders", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
-
-		await expect(job().run({ ...OPTIONS, folders: [] }, new AbortController().signal)).rejects.toThrow("папки");
-		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
-	});
-
-	it("keeps note and audio untouched when whisper fails", async () => {
-		transcriber.failFor("/vault/att/a.webm");
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-
-		const report = await run();
-
-		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
-		expect(vault.audio.has("att/a.webm")).toBe(true);
-		expect(report.failures).toHaveLength(1);
-		expect(journal.list()).toEqual([]);
-	});
-
-	it("keeps audio when transcript is empty", async () => {
-		transcriber = new FakeTranscriber({ "/vault/att/a.webm": "  \n " });
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-
-		const report = await run();
-
-		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
-		expect(vault.audio.has("att/a.webm")).toBe(true);
-		expect(report.failures).toHaveLength(1);
-	});
-
-	it("does not trash audio still referenced by another note", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"])
-			.addNote("Other/ref.md", "see [[a.webm]]");
-
-		await run();
-
-		expect(vault.content("Inbox/n.md")).toBe("text of a");
-		expect(vault.trashed).toEqual([]);
-		expect(journal.list()).toEqual([]);
-	});
-
-	it("transcribes shared audio once and trashes it after the last note", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addNote("Inbox/one.md", "![[a.webm]]", ["transcribe"])
-			.addNote("Inbox/two.md", "x ![[a.webm]]", ["transcribe"]);
-
-		await run();
-
-		expect(transcriber.calls).toEqual(["/vault/att/a.webm"]);
-		expect(vault.content("Inbox/one.md")).toBe("text of a");
-		expect(vault.content("Inbox/two.md")).toBe("x text of a");
-		expect(vault.trashed).toEqual(["att/a.webm"]);
-	});
-
-	it("is idempotent: a second run has nothing to do", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-
-		await run();
-		const second = await run();
-
-		expect(second.total).toBe(0);
-		expect(transcriber.calls).toHaveLength(1);
-		expect(vault.content("Inbox/n.md")).toBe("text of a");
-	});
-
-	it("recovers after a crash between replacing text and trashing audio", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-		vault.failOnTrash = true;
-		await expect(run()).resolves.toMatchObject({ failures: [expect.anything()] });
-		expect(vault.content("Inbox/n.md")).toBe("text of a");
-		expect(vault.audio.has("att/a.webm")).toBe(true);
-
-		vault.failOnTrash = false;
-		const report = await run();
-
-		expect(report.recoveredDeletions).toBe(1);
-		expect(vault.trashed).toEqual(["att/a.webm"]);
-		expect(journal.list()).toEqual([]);
-	});
-
-	it("never trashes audio after a crash before its text was saved", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-		vault.failOnReplace = true;
-		await run();
-		expect(journal.list()).toHaveLength(1);
-
-		vault.failOnReplace = false;
-		vault.notes.get("Inbox/n.md")!.content = "user removed the link";
-		const report = await run();
-
-		expect(report.recoveredDeletions).toBe(0);
-		expect(vault.audio.has("att/a.webm")).toBe(true);
-		expect(journal.list()).toEqual([]);
-	});
-
-	it("reprocesses audio after a crash before replacing", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-		vault.failOnReplace = true;
-		await run();
-
-		vault.failOnReplace = false;
-		const report = await run();
-
-		expect(report.done).toBe(1);
-		expect(vault.content("Inbox/n.md")).toBe("text of a");
-		expect(vault.trashed).toEqual(["att/a.webm"]);
-	});
-
-	it("stops on cancellation without touching remaining notes", async () => {
-		vault
-			.addAudio("att/a.webm")
-			.addAudio("att/b.webm")
-			.addNote("Inbox/n.md", "![[a.webm]] ![[b.webm]]", ["transcribe"]);
-		const controller = new AbortController();
-		progress.onTaskEnd = () => controller.abort();
-
-		const report = await run(controller.signal);
-
-		expect(report).toMatchObject({ total: 2, done: 1, cancelled: true });
-		expect(vault.content("Inbox/n.md")).toBe("text of a ![[b.webm]]");
-		expect(vault.audio.has("att/b.webm")).toBe(true);
-	});
-
-	it("reports missing audio file as failure", async () => {
-		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]", ["transcribe"]);
-		vault.audio.clear();
-		vault.audio.add("att/a.webm");
-		const embeds = vault.findAudioEmbeds("Inbox/n.md");
-		vault.audio.clear();
-		vault.findAudioEmbeds = () => embeds;
-
-		const report = await run();
-
-		expect(report.failures[0].message).toContain("не найден");
-		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
+			expect(report.done).toBe(1);
+			expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe");
+			expect(vault.trashed).toEqual(["att/a.webm"]);
+		});
 	});
 });

@@ -29,7 +29,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Теги")
-			.setDesc("По одному на строку, без #. Обрабатываются только заметки с любым из этих тегов. Хотя бы один тег обязателен.")
+			.setDesc("По одному на строку, без #. Распознаётся только аудио, на строке с которым стоит любой из этих тегов, например «- ![[rec.m4a]] #transcribe». Хотя бы один тег обязателен.")
 			.addTextArea((text) =>
 				text
 					.setPlaceholder("transcribe")
@@ -41,7 +41,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Удалять тег после распознавания")
-			.setDesc("Тег снимается, только если всё аудио в заметке успешно распознано.")
+			.setDesc("Снимать тег со строки, в которую вставлен текст.")
 			.addToggle((toggle) =>
 				toggle.setValue(settings.removeTagsAfter).onChange((value) => this.store.updateSettings({ removeTagsAfter: value })),
 			);

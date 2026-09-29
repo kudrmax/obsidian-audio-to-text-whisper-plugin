@@ -1,5 +1,4 @@
-import { removeInlineTags } from "../src/domain/removeInlineTags";
-import { replaceReference } from "../src/domain/replaceReference";
+import { InlineTags } from "../src/domain/InlineTags";
 import {
 	AudioEmbed,
 	DeletionJournal,
@@ -12,18 +11,18 @@ import {
 
 interface FakeNote {
 	content: string;
-	tags: string[];
 }
 
 export class FakeVault implements VaultGateway {
 	readonly notes = new Map<string, FakeNote>();
 	readonly audio = new Set<string>();
 	readonly trashed: string[] = [];
-	failOnReplace = false;
+	failOnEdit = false;
+	editDuringTranscription?: (content: string) => string;
 	failOnTrash = false;
 
-	addNote(path: string, content: string, tags: string[] = []): this {
-		this.notes.set(path, { content, tags });
+	addNote(path: string, content: string): this {
+		this.notes.set(path, { content });
 		return this;
 	}
 
@@ -39,7 +38,7 @@ export class FakeVault implements VaultGateway {
 	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
 		return [...this.notes.entries()]
 			.filter(([path]) => folders.some((f) => path.startsWith(`${f}/`)))
-			.filter(([, note]) => note.tags.some((t) => tags.includes(t)))
+			.filter(([, note]) => new InlineTags(tags).matches(note.content))
 			.map(([path]) => path);
 	}
 
@@ -58,17 +57,16 @@ export class FakeVault implements VaultGateway {
 		return `/vault/${path}`;
 	}
 
-	async replaceInNote(notePath: string, search: string, replacement: string): Promise<boolean> {
-		if (this.failOnReplace) throw new Error("crash on replace");
-		const note = this.notes.get(notePath)!;
-		const updated = replaceReference(note.content, search, replacement);
-		const replaced = updated !== note.content;
-		note.content = updated;
-		return replaced;
+	async readNote(notePath: string): Promise<string | undefined> {
+		return this.notes.get(notePath)?.content;
 	}
 
-	async noteContains(notePath: string, text: string): Promise<boolean> {
-		return this.notes.get(notePath)?.content.includes(text) ?? false;
+	async editNote(notePath: string, edit: (content: string) => string): Promise<void> {
+		if (this.failOnEdit) throw new Error("crash on edit");
+		const note = this.notes.get(notePath);
+		if (!note) throw new Error(`note not found: ${notePath}`);
+		if (this.editDuringTranscription) note.content = this.editDuringTranscription(note.content);
+		note.content = edit(note.content);
 	}
 
 	async isReferenced(audioPath: string): Promise<boolean> {
@@ -80,12 +78,6 @@ export class FakeVault implements VaultGateway {
 		if (this.failOnTrash) throw new Error("crash on trash");
 		this.audio.delete(path);
 		this.trashed.push(path);
-	}
-
-	async removeTags(notePath: string, tags: readonly string[]): Promise<void> {
-		const note = this.notes.get(notePath)!;
-		note.content = removeInlineTags(note.content, tags);
-		note.tags = note.tags.filter((t) => !tags.includes(t));
 	}
 
 	private resolve(link: string): string | undefined {

@@ -1,7 +1,5 @@
 import { App, FileSystemAdapter, TFile, getAllTags, getLinkpath, normalizePath } from "obsidian";
 import { AudioEmbed, VaultGateway } from "../domain/ports";
-import { removeInlineTags } from "../domain/removeInlineTags";
-import { replaceReference } from "../domain/replaceReference";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "webm", "flac", "aac", "3gp", "mp4"]);
 
@@ -43,19 +41,13 @@ export class ObsidianVaultGateway implements VaultGateway {
 		return adapter.getFullPath(path);
 	}
 
-	async replaceInNote(notePath: string, search: string, replacement: string): Promise<boolean> {
-		let replaced = false;
-		await this.app.vault.process(this.file(notePath), (content) => {
-			const updated = replaceReference(content, search, replacement);
-			replaced = updated !== content;
-			return updated;
-		});
-		return replaced;
+	async readNote(notePath: string): Promise<string | undefined> {
+		const file = this.app.vault.getAbstractFileByPath(notePath);
+		return file instanceof TFile ? this.app.vault.read(file) : undefined;
 	}
 
-	async noteContains(notePath: string, text: string): Promise<boolean> {
-		const file = this.app.vault.getAbstractFileByPath(notePath);
-		return file instanceof TFile && (await this.app.vault.read(file)).includes(text);
+	async editNote(notePath: string, edit: (content: string) => string): Promise<void> {
+		await this.app.vault.process(this.file(notePath), edit);
 	}
 
 	/** Conservative on purpose: any mention of the file name counts as a reference, so audio is never trashed by mistake. */
@@ -73,23 +65,6 @@ export class ObsidianVaultGateway implements VaultGateway {
 
 	async trash(path: string): Promise<void> {
 		await this.app.vault.trash(this.file(path), true);
-	}
-
-	async removeTags(notePath: string, tags: readonly string[]): Promise<void> {
-		const file = this.file(notePath);
-		const unwanted = new Set(tags.map((t) => t.replace(/^#/, "").toLowerCase()));
-		await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-			for (const key of ["tags", "tag"]) {
-				const value = frontmatter[key];
-				if (value === undefined) continue;
-				const list = Array.isArray(value) ? value.map(String) : String(value).split(/[,\s]+/);
-				const kept = list.filter((t) => t && !unwanted.has(t.replace(/^#/, "").toLowerCase()));
-				if (kept.length === list.length) continue;
-				if (kept.length === 0) delete frontmatter[key];
-				else frontmatter[key] = kept;
-			}
-		});
-		await this.app.vault.process(file, (content) => removeInlineTags(content, tags));
 	}
 
 	private tagsOf(file: TFile): string[] {
