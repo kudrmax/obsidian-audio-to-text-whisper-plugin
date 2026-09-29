@@ -85,6 +85,20 @@ export class SettingsTab extends PluginSettingTab {
 					.onChange((value) => this.store.updateSettings({ model: value })),
 			);
 
+		if (isCpp) {
+			new Setting(containerEl)
+				.setName("VAD model file")
+				.setDesc(
+					"Path to a ggml-silero-*.bin voice activity detection model downloaded beforehand. It keeps Whisper from inventing text on silence and quiet speech. Leave empty to look in ~/whisper-models.",
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("~/whisper-models/ggml-silero-v5.1.2.bin")
+						.setValue(settings.vadModel)
+						.onChange((value) => this.store.updateSettings({ vadModel: value })),
+				);
+		}
+
 		new Setting(containerEl)
 			.setName("ffmpeg executable")
 			.setDesc("Used to convert audio and read its duration. Leave empty to auto-detect.")

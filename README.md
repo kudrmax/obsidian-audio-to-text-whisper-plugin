@@ -25,6 +25,12 @@ brew install whisper-cpp ffmpeg
 mkdir -p ~/whisper-models && curl -L -o ~/whisper-models/ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 ```
 
+A voice activity detection (VAD) model is required too: without it Whisper invents phrases like "Subtitles by…" on silence and quiet speech.
+
+```bash
+curl -L -o ~/whisper-models/ggml-silero-v5.1.2.bin https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+```
+
 ### openai-whisper (alternative)
 
 ```bash

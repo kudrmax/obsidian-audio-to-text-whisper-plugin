@@ -6,20 +6,24 @@ import { ModelLocator } from "./ModelLocator";
 import { BinaryLocator, ProcessRunner } from "./ProcessRunner";
 import { TempWorkspace } from "./TempWorkspace";
 
+const MODEL_DIRS = [
+	join(homedir(), "whisper-models"),
+	join(homedir(), ".cache/whisper.cpp"),
+	"/opt/homebrew/share/whisper-cpp",
+	"/usr/local/share/whisper-cpp",
+];
 const PROGRESS_LINE = /progress\s*=\s*(\d+)%/;
 
 export class WhisperCppTranscriber implements Transcriber {
 	static readonly models = new ModelLocator(
 		"whisper.cpp",
-		[
-			join(homedir(), "whisper-models"),
-			join(homedir(), ".cache/whisper.cpp"),
-			"/opt/homebrew/share/whisper-cpp",
-			"/usr/local/share/whisper-cpp",
-		],
+		MODEL_DIRS,
 		["ggml-large-v3-turbo.bin", "ggml-large-v3.bin", "ggml-medium.bin", "ggml-small.bin"],
-		/^ggml-.*\.bin$/,
+		/^ggml-(?!silero).*\.bin$/,
 	);
+
+	/** Without voice activity detection Whisper hallucinates phrases on silence and quiet speech. */
+	static readonly vadModels = new ModelLocator("whisper.cpp VAD", MODEL_DIRS, ["ggml-silero-v5.1.2.bin"], /^ggml-silero-.*\.bin$/);
 
 	constructor(private readonly settings: TranscriberSettings) {}
 
@@ -27,6 +31,7 @@ export class WhisperCppTranscriber implements Transcriber {
 		const whisper = BinaryLocator.locate(this.settings.whisperPath, ["whisper-cli", "whisper-cpp"]);
 		const ffmpeg = BinaryLocator.locate(this.settings.ffmpegPath, ["ffmpeg"]);
 		const model = WhisperCppTranscriber.models.locate(this.settings.model);
+		const vadModel = WhisperCppTranscriber.vadModels.locate(this.settings.vadModel);
 		const runner = new ProcessRunner();
 
 		return TempWorkspace.use(async (workspace) => {
@@ -38,7 +43,7 @@ export class WhisperCppTranscriber implements Transcriber {
 			);
 			await runner.run(
 				whisper,
-				["-m", model, "-f", wav, "-l", this.settings.language || "auto", "-otxt", "-of", workspace.path("out"), "-np", "-pp"],
+				["-m", model, "-f", wav, "-l", this.settings.language || "auto", "-otxt", "-of", workspace.path("out"), "-np", "-pp", "--vad", "-vm", vadModel],
 				signal,
 				(line) => {
 					const match = PROGRESS_LINE.exec(line);

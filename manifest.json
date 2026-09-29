@@ -1,7 +1,7 @@
 {
   "id": "audio-to-text-whisper",
   "name": "Audio to Text via Whisper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.6.6",
   "description": "Transcribes tagged audio in your notes with a local, offline Whisper and replaces it with text.",
   "author": "kudrmax",

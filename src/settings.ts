@@ -8,6 +8,7 @@ export interface TranscriberSettings {
 	whisperPath: string;
 	ffmpegPath: string;
 	model: string;
+	vadModel: string;
 	language: string;
 }
 
@@ -19,5 +20,6 @@ export const DEFAULT_SETTINGS: TranscriberSettings = {
 	whisperPath: "",
 	ffmpegPath: "",
 	model: "",
+	vadModel: "",
 	language: "ru",
 };
