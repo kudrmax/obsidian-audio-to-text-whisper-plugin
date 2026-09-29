@@ -36,7 +36,7 @@ export class ObsidianVaultGateway implements VaultGateway {
 	absolutePath(path: string): string {
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) {
-			throw new Error("плагин работает только в десктопной версии Obsidian");
+			throw new Error("the plugin works only in desktop Obsidian");
 		}
 		return adapter.getFullPath(path);
 	}
@@ -79,7 +79,7 @@ export class ObsidianVaultGateway implements VaultGateway {
 
 	private file(path: string): TFile {
 		const file = this.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) throw new Error(`файл не найден: ${path}`);
+		if (!(file instanceof TFile)) throw new Error(`file not found: ${path}`);
 		return file;
 	}
 }

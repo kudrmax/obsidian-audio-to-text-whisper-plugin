@@ -1,11 +1,13 @@
 import { InlineTags } from "../src/domain/InlineTags";
 import {
+	AudioDurations,
 	AudioEmbed,
 	DeletionJournal,
 	JobReport,
 	PendingDeletion,
 	ProgressListener,
 	Transcriber,
+	TranscriptionTask,
 	VaultGateway,
 } from "../src/domain/ports";
 
@@ -96,8 +98,9 @@ export class FakeTranscriber implements Transcriber {
 		return this;
 	}
 
-	async transcribe(absoluteAudioPath: string): Promise<string> {
+	async transcribe(absoluteAudioPath: string, _signal: AbortSignal, onProgress: (fraction: number) => void): Promise<string> {
 		this.calls.push(absoluteAudioPath);
+		onProgress(0.5);
 		if (this.failing.has(absoluteAudioPath)) throw new Error("whisper failed");
 		return this.texts[absoluteAudioPath] ?? `text of ${absoluteAudioPath.split("/").pop()!.split(".")[0]}`;
 	}
@@ -119,20 +122,34 @@ export class MemoryJournal implements DeletionJournal {
 	}
 }
 
+export class FixedDurations implements AudioDurations {
+	constructor(private readonly seconds: Record<string, number> = {}) {}
+
+	async secondsOf(absoluteAudioPath: string): Promise<number | undefined> {
+		return this.seconds[absoluteAudioPath];
+	}
+}
+
 export class RecordingProgress implements ProgressListener {
 	readonly events: string[] = [];
+	started: readonly TranscriptionTask[] = [];
 	report?: JobReport;
 
-	onStart(total: number): void {
-		this.events.push(`start ${total}`);
+	onStart(tasks: readonly TranscriptionTask[]): void {
+		this.started = tasks;
+		this.events.push(`start ${tasks.length}`);
 	}
 
-	onTaskStart(index: number, total: number): void {
-		this.events.push(`task ${index + 1}/${total}`);
+	onTaskStart(index: number): void {
+		this.events.push(`task ${index + 1}`);
 	}
 
-	onTaskEnd(index: number, total: number, _task: unknown, error?: string): void {
-		this.events.push(`end ${index + 1}/${total}${error ? ` error` : ""}`);
+	onTaskProgress(index: number, fraction: number): void {
+		this.events.push(`progress ${index + 1} ${fraction}`);
+	}
+
+	onTaskEnd(index: number, _task: TranscriptionTask, error?: string): void {
+		this.events.push(`end ${index + 1}${error ? " error" : ""}`);
 	}
 
 	onFinish(report: JobReport): void {

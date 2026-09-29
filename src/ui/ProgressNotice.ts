@@ -1,55 +1,99 @@
 import { Notice } from "obsidian";
+import { ProgressEstimator } from "../domain/ProgressEstimator";
 import { JobReport, ProgressListener, TranscriptionTask } from "../domain/ports";
+import { formatDuration } from "./formatDuration";
+
+const TITLE = "Audio to Text";
 
 export class ProgressNotice implements ProgressListener {
 	private notice?: Notice;
-	private startedAt = 0;
+	private timer?: number;
+	private estimator = new ProgressEstimator([]);
+	private tasks: readonly TranscriptionTask[] = [];
+	private currentIndex = 0;
+	private completed = 0;
 	private failed = 0;
 
-	constructor(private readonly statusBar: HTMLElement) {}
+	constructor(
+		private readonly statusBar: HTMLElement,
+		private readonly knownSpeed: number | undefined,
+		private readonly onSpeedMeasured: (speed: number) => void,
+	) {}
 
-	onStart(total: number): void {
-		this.startedAt = Date.now();
-		this.failed = 0;
-		if (total === 0) return;
-		this.notice = new Notice(`Whisper: найдено аудио — ${total}`, 0);
-		this.statusBar.setText(`Whisper: 0/${total}`);
+	onStart(tasks: readonly TranscriptionTask[]): void {
+		this.tasks = tasks;
+		this.estimator = new ProgressEstimator(
+			tasks.map((t) => t.durationSeconds),
+			this.knownSpeed,
+		);
+		if (tasks.length === 0) return;
+		this.notice = new Notice("", 0);
+		this.timer = window.setInterval(() => this.render(), 1000);
+		this.render();
 	}
 
-	onTaskStart(index: number, total: number, task: TranscriptionTask): void {
-		const name = task.embed.audioPath.split("/").pop();
-		const lines = [
-			`Whisper: ${index}/${total} готово${this.failed ? `, ошибок: ${this.failed}` : ""}`,
-			`Сейчас: ${name}`,
-			this.eta(index, total),
-		].filter(Boolean);
-		this.notice?.setMessage(lines.join("\n"));
-		this.statusBar.setText(`Whisper: ${index}/${total}`);
+	onTaskStart(index: number): void {
+		this.currentIndex = index;
+		this.estimator.start(index, Date.now());
+		this.render();
 	}
 
-	onTaskEnd(_index: number, _total: number, task: TranscriptionTask, error?: string): void {
-		if (!error) return;
-		this.failed++;
-		console.error(`[whisper-transcriber] ${task.notePath} → ${task.embed.audioPath}: ${error}`);
+	onTaskProgress(index: number, fraction: number): void {
+		this.estimator.progress(index, fraction);
+		this.render();
+	}
+
+	onTaskEnd(index: number, task: TranscriptionTask, error?: string): void {
+		this.estimator.finish(index, Date.now(), !error);
+		this.completed++;
+		if (error) {
+			this.failed++;
+			console.error(`[audio-to-text-whisper] ${task.notePath} → ${task.embed.audioPath}: ${error}`);
+		}
+		this.render();
 	}
 
 	onFinish(report: JobReport): void {
+		window.clearInterval(this.timer);
 		this.notice?.hide();
 		this.statusBar.setText("");
+		const speed = this.estimator.measuredSpeed;
+		if (speed !== undefined) this.onSpeedMeasured(speed);
 		new Notice(ProgressNotice.summary(report), report.failures.length ? 0 : 8000);
 	}
 
-	private eta(done: number, total: number): string {
-		if (done === 0) return "";
-		const perTask = (Date.now() - this.startedAt) / done;
-		const minutes = Math.ceil((perTask * (total - done)) / 60000);
-		return `Осталось ≈ ${minutes} мин`;
+	private render(): void {
+		if (!this.notice) return;
+		const total = this.tasks.length;
+		const percent = Math.floor(this.estimator.fraction() * 100);
+		const task = this.tasks[this.currentIndex];
+		const name = task?.embed.audioPath.split("/").pop() ?? "";
+		const length = task?.durationSeconds ? ` (${formatDuration(task.durationSeconds)})` : "";
+		const lines = [
+			`${TITLE}: ${this.completed}/${total} done · ${percent}%${this.failed ? ` · ${this.failed} failed` : ""}`,
+			`Now: ${name}${length}`,
+			this.etaLine(),
+		];
+		this.notice.setMessage(lines.join("\n"));
+		this.statusBar.setText(`${TITLE}: ${this.completed}/${total} · ${percent}%`);
+	}
+
+	private etaLine(): string {
+		const now = Date.now();
+		const remaining = this.estimator.remainingSeconds(now);
+		if (remaining === undefined) {
+			return `Estimating time… (${formatDuration(this.estimator.totalAudioSeconds)} of audio in total)`;
+		}
+		const finishAt = new Date(now + remaining * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+		return `≈ ${formatDuration(remaining)} left · done at ${finishAt}`;
 	}
 
 	private static summary(report: JobReport): string {
-		if (report.total === 0 && report.recoveredDeletions === 0) return "Whisper: нечего распознавать";
-		const lines = [`Whisper: распознано ${report.done} из ${report.total}${report.cancelled ? " (остановлено)" : ""}`];
-		if (report.recoveredDeletions) lines.push(`Досписано в корзину после прошлого прерывания: ${report.recoveredDeletions}`);
+		if (report.total === 0 && report.recoveredDeletions === 0) return `${TITLE}: nothing to transcribe`;
+		const lines = [`${TITLE}: transcribed ${report.done} of ${report.total}${report.cancelled ? " (stopped)" : ""}`];
+		if (report.recoveredDeletions) {
+			lines.push(`Moved to trash after the previous interrupted run: ${report.recoveredDeletions}`);
+		}
 		for (const failure of report.failures) {
 			lines.push(`✗ ${failure.task.embed.audioPath}: ${failure.message}`);
 		}

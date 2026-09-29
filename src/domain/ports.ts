@@ -6,6 +6,8 @@ export interface AudioEmbed {
 export interface TranscriptionTask {
 	readonly notePath: string;
 	readonly embed: AudioEmbed;
+	/** Zero for repeated references to already transcribed audio; undefined when the duration is unknown. */
+	readonly durationSeconds?: number;
 }
 
 export interface VaultGateway {
@@ -21,7 +23,11 @@ export interface VaultGateway {
 }
 
 export interface Transcriber {
-	transcribe(absoluteAudioPath: string, signal: AbortSignal): Promise<string>;
+	transcribe(absoluteAudioPath: string, signal: AbortSignal, onProgress: (fraction: number) => void): Promise<string>;
+}
+
+export interface AudioDurations {
+	secondsOf(absoluteAudioPath: string): Promise<number | undefined>;
 }
 
 export interface PendingDeletion {
@@ -50,8 +56,9 @@ export interface JobReport {
 }
 
 export interface ProgressListener {
-	onStart(total: number): void;
-	onTaskStart(index: number, total: number, task: TranscriptionTask): void;
-	onTaskEnd(index: number, total: number, task: TranscriptionTask, error?: string): void;
+	onStart(tasks: readonly TranscriptionTask[]): void;
+	onTaskStart(index: number, task: TranscriptionTask): void;
+	onTaskProgress(index: number, fraction: number): void;
+	onTaskEnd(index: number, task: TranscriptionTask, error?: string): void;
 	onFinish(report: JobReport): void;
 }

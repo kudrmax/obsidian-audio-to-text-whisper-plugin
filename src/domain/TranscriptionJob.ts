@@ -1,6 +1,7 @@
 import { InlineTags } from "./InlineTags";
 import { TaggedAudioLines } from "./TaggedAudioLines";
 import {
+	AudioDurations,
 	DeletionJournal,
 	JobReport,
 	ProgressListener,
@@ -30,45 +31,46 @@ export class TranscriptionJob {
 	constructor(
 		private readonly vault: VaultGateway,
 		private readonly transcriber: Transcriber,
+		private readonly durations: AudioDurations,
 		private readonly journal: DeletionJournal,
 		private readonly progress: ProgressListener,
 	) {}
 
 	async run(options: JobOptions, signal: AbortSignal): Promise<JobReport> {
 		if (options.folders.length === 0) {
-			throw new Error("не указаны папки для поиска аудио");
+			throw new Error("no folder configured to search for audio");
 		}
 		const tags = new InlineTags(options.tags);
 		if (tags.isEmpty) {
-			throw new Error("не указан ни один тег: распознаётся только аудио с тегом");
+			throw new Error("no tag configured: only audio marked with a tag is transcribed");
 		}
 		const lines = new TaggedAudioLines(tags, options.removeTagsAfter);
 		const recoveredDeletions = await this.completePendingDeletions();
-		const tasks = await this.collectTasks(options, lines);
+		const tasks = await this.withDurations(await this.collectTasks(options, lines));
 		const failures: TaskFailure[] = [];
 		let done = 0;
 		let cancelled = false;
 
-		this.progress.onStart(tasks.length);
+		this.progress.onStart(tasks);
 		for (const [index, task] of tasks.entries()) {
 			if (signal.aborted) {
 				cancelled = true;
 				break;
 			}
-			this.progress.onTaskStart(index, tasks.length, task);
+			this.progress.onTaskStart(index, task);
 			try {
-				await this.process(task, lines, signal);
+				await this.process(task, lines, signal, (fraction) => this.progress.onTaskProgress(index, fraction));
 				done++;
-				this.progress.onTaskEnd(index, tasks.length, task);
+				this.progress.onTaskEnd(index, task);
 			} catch (error) {
 				if (signal.aborted || error instanceof CancelledError) {
 					cancelled = true;
-					this.progress.onTaskEnd(index, tasks.length, task, "отменено");
+					this.progress.onTaskEnd(index, task, "cancelled");
 					break;
 				}
 				const message = error instanceof Error ? error.message : String(error);
 				failures.push({ task, message });
-				this.progress.onTaskEnd(index, tasks.length, task, message);
+				this.progress.onTaskEnd(index, task, message);
 			}
 		}
 
@@ -91,13 +93,36 @@ export class TranscriptionJob {
 		return tasks;
 	}
 
-	private async process(task: TranscriptionTask, lines: TaggedAudioLines, signal: AbortSignal): Promise<void> {
+	private async withDurations(tasks: TranscriptionTask[]): Promise<TranscriptionTask[]> {
+		const probed = new Set<string>();
+		const result: TranscriptionTask[] = [];
+		for (const task of tasks) {
+			const { audioPath } = task.embed;
+			if (probed.has(audioPath)) {
+				result.push({ ...task, durationSeconds: 0 });
+				continue;
+			}
+			probed.add(audioPath);
+			const durationSeconds = this.vault.exists(audioPath)
+				? await this.durations.secondsOf(this.vault.absolutePath(audioPath))
+				: undefined;
+			result.push({ ...task, durationSeconds });
+		}
+		return result;
+	}
+
+	private async process(
+		task: TranscriptionTask,
+		lines: TaggedAudioLines,
+		signal: AbortSignal,
+		onProgress: (fraction: number) => void,
+	): Promise<void> {
 		const { audioPath, linkText } = task.embed;
 		if (!this.vault.exists(audioPath)) {
-			throw new Error(`аудиофайл не найден: ${audioPath}`);
+			throw new Error(`audio file not found: ${audioPath}`);
 		}
 
-		const text = await this.transcriptOf(audioPath, signal);
+		const text = await this.transcriptOf(audioPath, signal, onProgress);
 		if (signal.aborted) throw new CancelledError();
 
 		await this.journal.add({ audioPath, notePath: task.notePath, transcript: text });
@@ -109,18 +134,20 @@ export class TranscriptionJob {
 		});
 		if (!replaced) {
 			await this.journal.remove(audioPath);
-			throw new Error(`строка с ${linkText} и тегом не найдена: заметку изменили во время распознавания, аудио сохранено`);
+			throw new Error(
+				`the line with ${linkText} and the tag was changed during transcription; the audio was kept, run again`,
+			);
 		}
 		await this.trashIfOrphaned(audioPath);
 	}
 
-	private async transcriptOf(audioPath: string, signal: AbortSignal): Promise<string> {
+	private async transcriptOf(audioPath: string, signal: AbortSignal, onProgress: (fraction: number) => void): Promise<string> {
 		const cached = this.transcripts.get(audioPath);
 		if (cached !== undefined) return cached;
 
-		const text = (await this.transcriber.transcribe(this.vault.absolutePath(audioPath), signal)).trim();
+		const text = (await this.transcriber.transcribe(this.vault.absolutePath(audioPath), signal, onProgress)).trim();
 		if (text.length === 0) {
-			throw new Error("Whisper вернул пустой текст, аудио оставлено как есть");
+			throw new Error("Whisper returned empty text; the audio was kept");
 		}
 		this.transcripts.set(audioPath, text);
 		return text;

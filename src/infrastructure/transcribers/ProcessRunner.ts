@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
@@ -14,7 +14,7 @@ export class BinaryLocator {
 	static locate(configured: string, names: readonly string[]): string {
 		if (configured.trim()) {
 			const path = expandHome(configured.trim());
-			if (!existsSync(path)) throw new Error(`не найден исполняемый файл: ${path}`);
+			if (!existsSync(path)) throw new Error(`executable not found: ${path}`);
 			return path;
 		}
 		for (const dir of COMMON_BIN_DIRS) {
@@ -23,29 +23,43 @@ export class BinaryLocator {
 				if (existsSync(candidate)) return candidate;
 			}
 		}
-		throw new Error(`не найден ${names.join(" / ")}: установите его или укажите путь в настройках`);
+		throw new Error(`${names.join(" / ")} not found: install it or set its path in the plugin settings`);
 	}
 }
 
 export class ProcessRunner {
 	constructor(private readonly extraBinDirs: readonly string[] = []) {}
 
-	run(binary: string, args: readonly string[], signal: AbortSignal): Promise<string> {
+	run(
+		binary: string,
+		args: readonly string[],
+		signal: AbortSignal,
+		onOutputLine: (line: string) => void = () => {},
+	): Promise<string> {
 		const path = [dirname(binary), ...this.extraBinDirs, ...COMMON_BIN_DIRS, process.env.PATH ?? ""].join(":");
 		return new Promise((resolve, reject) => {
-			execFile(
-				binary,
-				[...args],
-				{ signal, env: { ...process.env, PATH: path }, maxBuffer: 64 * 1024 * 1024 },
-				(error, stdout, stderr) => {
-					if (error) {
-						const details = String(stderr).trim().split("\n").slice(-3).join(" ");
-						reject(new Error(`${binary} завершился с ошибкой: ${details || error.message}`));
-						return;
-					}
-					resolve(String(stdout));
-				},
-			);
+			const child = spawn(binary, [...args], { signal, env: { ...process.env, PATH: path }, stdio: ["ignore", "pipe", "pipe"] });
+			let stdout = "";
+			let stderrTail = "";
+			const splitLines = (chunk: Buffer) => String(chunk).split(/[\r\n]+/).filter(Boolean).forEach(onOutputLine);
+
+			child.stdout.on("data", (chunk: Buffer) => {
+				stdout += String(chunk);
+				splitLines(chunk);
+			});
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderrTail = (stderrTail + String(chunk)).slice(-2000);
+				splitLines(chunk);
+			});
+			child.on("error", (error) => reject(error));
+			child.on("close", (code) => {
+				if (code === 0) {
+					resolve(stdout);
+					return;
+				}
+				const details = stderrTail.trim().split("\n").slice(-3).join(" ");
+				reject(new Error(`${binary} exited with code ${code}: ${details}`));
+			});
 		});
 	}
 }

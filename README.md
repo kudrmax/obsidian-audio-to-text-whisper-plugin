@@ -1,17 +1,21 @@
-# Whisper Transcriber для Obsidian
+# Audio to Text via Whisper
 
-Распознаёт **локальным офлайн-Whisper** аудио в заметках указанной папки (и её подпапок), но только то, на строке с которым стоит тег (по умолчанию `transcribe`):
+An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. Only audio marked with a tag on the same line is processed:
 
 ```
-- ![[Recording_1.m4a]] #transcribe   ← распознаётся
-- ![[Recording_2.m4a]]               ← не трогается
+- ![[Recording_1.m4a]] #transcribe   ← transcribed
+- ![[Recording_2.m4a]]               ← left untouched
 ```
 
-Подходят встраивания `![[rec.m4a]]`, ссылки `[[rec.m4a]]` и markdown-ссылки `[…](rec.m4a)`. Ссылка заменяется текстом (тег со строки по настройке снимается), а аудио отправляется в системную корзину.
+Embeds `![[rec.m4a]]`, wiki links `[[rec.m4a]]` and markdown links `[…](rec.m4a)` are supported. The reference is replaced with the transcript, the tag is optionally removed from that line, and the audio is moved to the system trash once nothing references it anymore.
 
-## Установка Whisper (один раз)
+Desktop only (macOS, Linux). Nothing leaves your machine.
 
-Рекомендуется whisper.cpp — он самый быстрый на Apple Silicon (Metal):
+## Requirements
+
+The plugin never installs Whisper and never downloads models — set them up once beforehand.
+
+### whisper.cpp (recommended, fastest on Apple Silicon)
 
 ```bash
 brew install whisper-cpp ffmpeg
@@ -21,30 +25,48 @@ brew install whisper-cpp ffmpeg
 mkdir -p ~/whisper-models && curl -L -o ~/whisper-models/ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 ```
 
-Альтернатива — `openai-whisper` (`pipx install openai-whisper`), движок переключается в настройках.
-
-Бинарники и модель ищутся автоматически в `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` и `~/whisper-models`. Любой путь можно задать вручную.
-
-## Установка плагина
+### openai-whisper (alternative)
 
 ```bash
-npm install && npm run build
+pipx install openai-whisper && brew install ffmpeg
 ```
 
-Скопировать `main.js` и `manifest.json` в `<vault>/.obsidian/plugins/whisper-transcriber/` и включить плагин.
+```bash
+mkdir -p ~/.cache/whisper && curl -L -o ~/.cache/whisper/large-v3-turbo.pt https://openaipublic.azureedge.net/main/whisper/models/aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a/large-v3-turbo.pt
+```
 
-## Использование
+Executables are auto-detected in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`; models in `~/whisper-models` (whisper.cpp) and `~/.cache/whisper` (openai-whisper). Any path can be set explicitly in the settings.
 
-Команда «Распознать аудио в заметках» или иконка микрофона. Прогресс виден в уведомлении и в статус-баре: `N/M`, текущий файл, оставшееся время. Остановить можно командой «Остановить распознавание».
+## Installation
 
-## Гарантии сохранности
+Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): *Add beta plugin* → `kudrmax/obsidian-audio-to-text-whisper-plugin`.
 
-Для каждого аудио шаги идут строго по порядку:
+## Usage
 
-1. распознавание (без побочных эффектов);
-2. запись в журнал (`data.json`): аудио, заметка, текст;
-3. атомарная замена ссылки на текст в строке с тегом (`vault.process`). Если эту строку изменили во время распознавания — ошибка, аудио остаётся; правки в остальной заметке сохраняются;
-4. отправка аудио в системную корзину, только если на него больше никто не ссылается;
-5. удаление записи из журнала.
+1. Set the folder to scan (subfolders included) and the tags in the plugin settings.
+2. Put a tag next to the audio you want transcribed.
+3. Run **Transcribe tagged audio** from the command palette or the ribbon.
 
-При прерывании на любом шаге аудио не теряется. В начале следующего запуска журнал дочищается: аудио удаляется, только если текст точно есть в заметке. Если Whisper вернул ошибку или пустой текст, заметка и аудио остаются без изменений.
+Progress is shown in a notice and the status bar: files done, percentage, current file and estimated time left. The estimate uses audio durations (via `ffprobe`) and the transcription speed remembered from previous runs. Run **Stop transcription** to cancel.
+
+## Data safety
+
+Each audio goes through strictly ordered steps:
+
+1. transcription (no side effects);
+2. a journal entry in the plugin data: audio, note, transcript;
+3. atomic replacement of the reference on the tagged line (`vault.process`). If that line was changed during transcription, the run reports an error and keeps the audio; edits elsewhere in the note are preserved;
+4. the audio is moved to the system trash only if nothing references it anymore;
+5. the journal entry is removed.
+
+An interruption at any step never loses audio: the next run finishes pending deletions, trashing audio only if its transcript is really in the note. If Whisper fails or returns empty text, the note and the audio stay as they were.
+
+## Development
+
+```bash
+npm install
+```
+
+```bash
+npm test && npm run build
+```

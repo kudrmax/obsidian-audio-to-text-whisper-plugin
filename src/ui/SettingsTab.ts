@@ -13,7 +13,7 @@ export class SettingsTab extends PluginSettingTab {
 		const settings = this.store.settings;
 		containerEl.empty();
 
-		const folderSetting = new Setting(containerEl).setName("Папка");
+		const folderSetting = new Setting(containerEl).setName("Folder");
 		const describeFolder = (value: string) => folderSetting.setDesc(this.folderDescription(value));
 		folderSetting.addText((text) => {
 			new FolderSuggest(this.app, text.inputEl);
@@ -28,8 +28,10 @@ export class SettingsTab extends PluginSettingTab {
 		describeFolder(settings.folder);
 
 		new Setting(containerEl)
-			.setName("Теги")
-			.setDesc("По одному на строку, без #. Распознаётся только аудио, на строке с которым стоит любой из этих тегов, например «- ![[rec.m4a]] #transcribe». Хотя бы один тег обязателен.")
+			.setName("Tags")
+			.setDesc(
+				"One per line, without #. Only audio with any of these tags on the same line is transcribed, e.g. \"- ![[rec.m4a]] #transcribe\". At least one tag is required.",
+			)
 			.addTextArea((text) =>
 				text
 					.setPlaceholder("transcribe")
@@ -40,19 +42,19 @@ export class SettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Удалять тег после распознавания")
-			.setDesc("Снимать тег со строки, в которую вставлен текст.")
+			.setName("Remove tag after transcription")
+			.setDesc("Remove the tag from the line where the text was inserted.")
 			.addToggle((toggle) =>
 				toggle.setValue(settings.removeTagsAfter).onChange((value) => this.store.updateSettings({ removeTagsAfter: value })),
 			);
 
 		new Setting(containerEl)
-			.setName("Движок")
-			.setDesc("Оба работают локально, офлайн.")
+			.setName("Engine")
+			.setDesc("Both run locally and offline.")
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOption("whisper.cpp", "whisper.cpp (brew install whisper-cpp)")
-					.addOption("openai-whisper", "openai-whisper (pip install openai-whisper)")
+					.addOption("openai-whisper", "openai-whisper (pipx install openai-whisper)")
 					.setValue(settings.engine)
 					.onChange(async (value) => {
 						await this.store.updateSettings({ engine: value as WhisperEngine, whisperPath: "", model: "" });
@@ -63,42 +65,45 @@ export class SettingsTab extends PluginSettingTab {
 		const isCpp = settings.engine === "whisper.cpp";
 
 		new Setting(containerEl)
-			.setName("Путь к Whisper")
-			.setDesc(`Пусто — искать ${isCpp ? "whisper-cli" : "whisper"} в /opt/homebrew/bin, /usr/local/bin, ~/.local/bin.`)
+			.setName("Whisper executable")
+			.setDesc(`Leave empty to look for ${isCpp ? "whisper-cli" : "whisper"} in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin.`)
 			.addText((text) =>
-				text.setPlaceholder("автоопределение").setValue(settings.whisperPath).onChange((value) => this.store.updateSettings({ whisperPath: value })),
+				text.setPlaceholder("auto-detect").setValue(settings.whisperPath).onChange((value) => this.store.updateSettings({ whisperPath: value })),
 			);
 
 		new Setting(containerEl)
-			.setName(isCpp ? "Файл модели" : "Модель")
+			.setName("Model file")
 			.setDesc(
 				isCpp
-					? "Путь к ggml-*.bin. Пусто — искать в ~/whisper-models (предпочтительно ggml-large-v3-turbo.bin)."
-					: "Имя модели: tiny, base, small, medium, large-v3, turbo. Пусто — turbo.",
+					? "Path to a ggml-*.bin model downloaded beforehand. Leave empty to look in ~/whisper-models (ggml-large-v3-turbo.bin preferred)."
+					: "Path to a .pt model downloaded beforehand. Leave empty to look in ~/.cache/whisper (large-v3-turbo.pt preferred). The plugin never downloads models.",
 			)
 			.addText((text) =>
-				text.setPlaceholder(isCpp ? "~/whisper-models/ggml-large-v3-turbo.bin" : "turbo").setValue(settings.model).onChange((value) => this.store.updateSettings({ model: value })),
+				text
+					.setPlaceholder(isCpp ? "~/whisper-models/ggml-large-v3-turbo.bin" : "~/.cache/whisper/large-v3-turbo.pt")
+					.setValue(settings.model)
+					.onChange((value) => this.store.updateSettings({ model: value })),
 			);
 
 		new Setting(containerEl)
-			.setName("Путь к ffmpeg")
-			.setDesc("Нужен для конвертации аудио. Пусто — автоопределение.")
+			.setName("ffmpeg executable")
+			.setDesc("Used to convert audio and read its duration. Leave empty to auto-detect.")
 			.addText((text) =>
-				text.setPlaceholder("автоопределение").setValue(settings.ffmpegPath).onChange((value) => this.store.updateSettings({ ffmpegPath: value })),
+				text.setPlaceholder("auto-detect").setValue(settings.ffmpegPath).onChange((value) => this.store.updateSettings({ ffmpegPath: value })),
 			);
 
 		new Setting(containerEl)
-			.setName("Язык")
-			.setDesc("Код языка (ru, en, …) или auto.")
+			.setName("Language")
+			.setDesc("Language code (en, ru, …) or auto.")
 			.addText((text) => text.setValue(settings.language).onChange((value) => this.store.updateSettings({ language: value.trim() })));
 	}
 
 	private folderDescription(value: string): string {
-		const hint = "Где искать заметки с аудио, вложенные папки тоже обрабатываются.";
+		const hint = "Where to look for notes with audio, including subfolders.";
 		const folder = value.trim();
-		if (!folder) return `${hint} Обязательно.`;
+		if (!folder) return `${hint} Required.`;
 		const exists = this.app.vault.getAbstractFileByPath(normalizePath(folder)) instanceof TFolder;
-		return exists ? hint : `⚠ Папка «${folder}» не найдена.`;
+		return exists ? hint : `⚠ Folder "${folder}" not found.`;
 	}
 
 	private static lines(value: string): string[] {

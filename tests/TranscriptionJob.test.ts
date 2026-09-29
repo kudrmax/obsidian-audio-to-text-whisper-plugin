@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { JobOptions, TranscriptionJob } from "../src/domain/TranscriptionJob";
-import { FakeTranscriber, FakeVault, MemoryJournal, RecordingProgress } from "./fakes";
+import { FakeTranscriber, FakeVault, FixedDurations, MemoryJournal, RecordingProgress } from "./fakes";
 
 const OPTIONS: JobOptions = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
 
@@ -9,15 +9,17 @@ describe("TranscriptionJob", () => {
 	let transcriber: FakeTranscriber;
 	let journal: MemoryJournal;
 	let progress: RecordingProgress;
+	let durations: FixedDurations;
 
 	const run = (options: Partial<JobOptions> = {}, signal = new AbortController().signal) =>
-		new TranscriptionJob(vault, transcriber, journal, progress).run({ ...OPTIONS, ...options }, signal);
+		new TranscriptionJob(vault, transcriber, durations, journal, progress).run({ ...OPTIONS, ...options }, signal);
 
 	beforeEach(() => {
 		vault = new FakeVault();
 		transcriber = new FakeTranscriber();
 		journal = new MemoryJournal();
 		progress = new RecordingProgress();
+		durations = new FixedDurations();
 	});
 
 	describe("selection", () => {
@@ -66,11 +68,23 @@ describe("TranscriptionJob", () => {
 			expect(vault.trashed).toEqual(["All files/rec.m4a"]);
 		});
 
+		it("probes each audio duration once, repeated references count as zero", async () => {
+			durations = new FixedDurations({ "/vault/att/a.webm": 30 });
+			vault
+				.addAudio("att/a.webm")
+				.addAudio("att/b.webm")
+				.addNote("Inbox/n.md", "[[a.webm]] #transcribe\n![[a.webm]] #transcribe\n![[b.webm]] #transcribe");
+
+			await run();
+
+			expect(progress.started.map((t) => t.durationSeconds)).toEqual([30, 0, undefined]);
+		});
+
 		it("refuses to run without tags or folders", async () => {
 			vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe");
 
-			await expect(run({ tags: [] })).rejects.toThrow("тег");
-			await expect(run({ folders: [] })).rejects.toThrow("папки");
+			await expect(run({ tags: [] })).rejects.toThrow("tag");
+			await expect(run({ folders: [] })).rejects.toThrow("folder");
 			expect(transcriber.calls).toEqual([]);
 		});
 	});
@@ -85,7 +99,7 @@ describe("TranscriptionJob", () => {
 			expect(vault.trashed).toEqual(["att/a.webm"]);
 			expect(journal.list()).toEqual([]);
 			expect(report).toMatchObject({ total: 1, done: 1, failures: [], cancelled: false });
-			expect(progress.events).toEqual(["start 1", "task 1/1", "end 1/1"]);
+			expect(progress.events).toEqual(["start 1", "task 1", "progress 1 0.5", "end 1"]);
 		});
 
 		it("removes the tag from the transcribed line only", async () => {
@@ -176,7 +190,7 @@ describe("TranscriptionJob", () => {
 
 			const report = await run();
 
-			expect(report.failures[0].message).toContain("изменили во время распознавания");
+			expect(report.failures[0].message).toContain("changed during transcription");
 			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]\nother");
 			expect(vault.audio.has("att/a.webm")).toBe(true);
 			expect(journal.list()).toEqual([]);
@@ -199,7 +213,7 @@ describe("TranscriptionJob", () => {
 
 			const report = await run();
 
-			expect(report.failures[0].message).toContain("не найден");
+			expect(report.failures[0].message).toContain("not found");
 			expect(vault.content("Inbox/n.md")).toBe("![[a.webm]] #transcribe");
 		});
 
