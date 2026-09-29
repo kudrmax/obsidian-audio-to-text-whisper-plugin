@@ -1,6 +1,7 @@
-import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, Plugin, PluginSettingTab, Setting, TFolder, normalizePath } from "obsidian";
 import { PluginStore } from "../infrastructure/PluginStore";
 import { WhisperEngine } from "../settings";
+import { FolderSuggest } from "./FolderSuggest";
 
 export class SettingsTab extends PluginSettingTab {
 	constructor(app: App, plugin: Plugin, private readonly store: PluginStore) {
@@ -12,15 +13,19 @@ export class SettingsTab extends PluginSettingTab {
 		const settings = this.store.settings;
 		containerEl.empty();
 
-		new Setting(containerEl)
-			.setName("Папки")
-			.setDesc("Где искать заметки с аудио. По одной на строку, вложенные папки тоже обрабатываются. «/» — весь vault. Без папок плагин не запускается.")
-			.addTextArea((text) =>
-				text
-					.setPlaceholder("Inbox\nJournal/Voice")
-					.setValue(settings.folders.join("\n"))
-					.onChange((value) => this.store.updateSettings({ folders: SettingsTab.lines(value) })),
-			);
+		const folderSetting = new Setting(containerEl).setName("Папка");
+		const describeFolder = (value: string) => folderSetting.setDesc(this.folderDescription(value));
+		folderSetting.addText((text) => {
+			new FolderSuggest(this.app, text.inputEl);
+			text
+				.setPlaceholder("Daily")
+				.setValue(settings.folder)
+				.onChange(async (value) => {
+					describeFolder(value);
+					await this.store.updateSettings({ folder: value.trim() });
+				});
+		});
+		describeFolder(settings.folder);
 
 		new Setting(containerEl)
 			.setName("Теги")
@@ -79,6 +84,14 @@ export class SettingsTab extends PluginSettingTab {
 			.setName("Язык")
 			.setDesc("Код языка (ru, en, …) или auto.")
 			.addText((text) => text.setValue(settings.language).onChange((value) => this.store.updateSettings({ language: value.trim() })));
+	}
+
+	private folderDescription(value: string): string {
+		const hint = "Где искать заметки с аудио, вложенные папки тоже обрабатываются.";
+		const folder = value.trim();
+		if (!folder) return `${hint} Обязательно.`;
+		const exists = this.app.vault.getAbstractFileByPath(normalizePath(folder)) instanceof TFolder;
+		return exists ? hint : `⚠ Папка «${folder}» не найдена.`;
 	}
 
 	private static lines(value: string): string[] {

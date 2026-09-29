@@ -47,7 +47,7 @@ export default class WhisperTranscriberPlugin extends Plugin {
 				this.store,
 				new ProgressNotice(this.statusBar),
 			);
-			await job.run({ folders: settings.folders, tags: settings.tags }, this.running.signal);
+			await job.run({ folders: settings.folder.trim() ? [settings.folder.trim()] : [], tags: settings.tags }, this.running.signal);
 		} catch (error) {
 			new Notice(`Whisper: ${error instanceof Error ? error.message : String(error)}`, 0);
 		} finally {
