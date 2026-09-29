@@ -1,0 +1,9 @@
+{
+  "id": "whisper-transcriber",
+  "name": "Whisper Transcriber",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Transcribes audio embedded in tagged notes with a local Whisper and replaces it with text.",
+  "author": "Max",
+  "isDesktopOnly": true
+}
