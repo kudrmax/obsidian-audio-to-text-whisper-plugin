@@ -1,3 +1,4 @@
+import { removeInlineTags } from "../src/domain/removeInlineTags";
 import { replaceReference } from "../src/domain/replaceReference";
 import {
 	AudioEmbed,
@@ -79,6 +80,12 @@ export class FakeVault implements VaultGateway {
 		if (this.failOnTrash) throw new Error("crash on trash");
 		this.audio.delete(path);
 		this.trashed.push(path);
+	}
+
+	async removeTags(notePath: string, tags: readonly string[]): Promise<void> {
+		const note = this.notes.get(notePath)!;
+		note.content = removeInlineTags(note.content, tags);
+		note.tags = note.tags.filter((t) => !tags.includes(t));
 	}
 
 	private resolve(link: string): string | undefined {

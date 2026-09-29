@@ -11,6 +11,7 @@ import {
 export interface JobOptions {
 	readonly folders: readonly string[];
 	readonly tags: readonly string[];
+	readonly removeTagsAfter: boolean;
 }
 
 class CancelledError extends Error {}
@@ -42,6 +43,7 @@ export class TranscriptionJob {
 		const failures: TaskFailure[] = [];
 		let done = 0;
 		let cancelled = false;
+		let noteFailed = false;
 
 		this.progress.onStart(tasks.length);
 		for (const [index, task] of tasks.entries()) {
@@ -60,15 +62,33 @@ export class TranscriptionJob {
 					this.progress.onTaskEnd(index, tasks.length, task, "отменено");
 					break;
 				}
+				noteFailed = true;
 				const message = error instanceof Error ? error.message : String(error);
 				failures.push({ task, message });
 				this.progress.onTaskEnd(index, tasks.length, task, message);
+			}
+
+			const noteFinished = tasks[index + 1]?.notePath !== task.notePath;
+			if (noteFinished) {
+				if (!noteFailed && options.removeTagsAfter) {
+					await this.removeTags(task, options.tags, failures);
+				}
+				noteFailed = false;
 			}
 		}
 
 		const report: JobReport = { total: tasks.length, done, failures, cancelled, recoveredDeletions };
 		this.progress.onFinish(report);
 		return report;
+	}
+
+	private async removeTags(task: TranscriptionTask, tags: readonly string[], failures: TaskFailure[]): Promise<void> {
+		try {
+			await this.vault.removeTags(task.notePath, tags);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			failures.push({ task, message: `текст вставлен, но тег не удалён: ${message}` });
+		}
 	}
 
 	private collectTasks(options: JobOptions): TranscriptionTask[] {

@@ -40,6 +40,13 @@ export class SettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Удалять тег после распознавания")
+			.setDesc("Тег снимается, только если всё аудио в заметке успешно распознано.")
+			.addToggle((toggle) =>
+				toggle.setValue(settings.removeTagsAfter).onChange((value) => this.store.updateSettings({ removeTagsAfter: value })),
+			);
+
+		new Setting(containerEl)
 			.setName("Движок")
 			.setDesc("Оба работают локально, офлайн.")
 			.addDropdown((dropdown) =>

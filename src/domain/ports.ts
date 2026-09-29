@@ -17,6 +17,7 @@ export interface VaultGateway {
 	noteContains(notePath: string, text: string): Promise<boolean>;
 	isReferenced(audioPath: string): Promise<boolean>;
 	trash(path: string): Promise<void>;
+	removeTags(notePath: string, tags: readonly string[]): Promise<void>;
 }
 
 export interface Transcriber {

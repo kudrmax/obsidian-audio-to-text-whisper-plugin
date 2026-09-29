@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TranscriptionJob } from "../src/domain/TranscriptionJob";
 import { FakeTranscriber, FakeVault, MemoryJournal, RecordingProgress } from "./fakes";
 
-const OPTIONS = { folders: ["Inbox"], tags: ["transcribe"] };
+const OPTIONS = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
 
 describe("TranscriptionJob", () => {
 	let vault: FakeVault;
@@ -47,7 +47,7 @@ describe("TranscriptionJob", () => {
 	it("refuses to run without tags", async () => {
 		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
 
-		await expect(job().run({ folders: ["Inbox"], tags: [] }, new AbortController().signal)).rejects.toThrow("тег");
+		await expect(job().run({ ...OPTIONS, tags: [] }, new AbortController().signal)).rejects.toThrow("тег");
 		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
 		expect(transcriber.calls).toEqual([]);
 	});
@@ -61,7 +61,7 @@ describe("TranscriptionJob", () => {
 			.addNote("Inbox/two.md", "![[b.webm]]", ["transcribe"])
 			.addNote("Inbox/three.md", "![[c.webm]]", ["other"]);
 
-		const report = await job().run({ folders: ["Inbox"], tags: ["voice", "transcribe"] }, new AbortController().signal);
+		const report = await job().run({ ...OPTIONS, tags: ["voice", "transcribe"] }, new AbortController().signal);
 
 		expect(report.total).toBe(2);
 		expect(vault.content("Inbox/three.md")).toBe("![[c.webm]]");
@@ -80,10 +80,45 @@ describe("TranscriptionJob", () => {
 		expect(vault.trashed).toEqual(["All files/rec.m4a"]);
 	});
 
+	it("removes the tag once every audio in the note is transcribed", async () => {
+		vault
+			.addAudio("att/a.webm")
+			.addAudio("att/b.webm")
+			.addNote("Inbox/n.md", "- ![[a.webm]] #transcribe\n- ![[b.webm]] #transcribe", ["transcribe"]);
+
+		await job().run({ ...OPTIONS, removeTagsAfter: true }, new AbortController().signal);
+
+		expect(vault.content("Inbox/n.md")).toBe("- text of a\n- text of b");
+		expect(vault.findNotes(["Inbox"], ["transcribe"])).toEqual([]);
+	});
+
+	it("keeps the tag when the setting is off", async () => {
+		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]] #transcribe", ["transcribe"]);
+
+		await run();
+
+		expect(vault.content("Inbox/n.md")).toBe("text of a #transcribe");
+	});
+
+	it("keeps the tag when some audio in the note failed", async () => {
+		transcriber.failFor("/vault/att/b.webm");
+		vault
+			.addAudio("att/a.webm")
+			.addAudio("att/b.webm")
+			.addNote("Inbox/n.md", "![[a.webm]] ![[b.webm]] #transcribe", ["transcribe"])
+			.addAudio("att/c.webm")
+			.addNote("Inbox/other.md", "![[c.webm]] #transcribe", ["transcribe"]);
+
+		await job().run({ ...OPTIONS, removeTagsAfter: true }, new AbortController().signal);
+
+		expect(vault.content("Inbox/n.md")).toBe("text of a ![[b.webm]] #transcribe");
+		expect(vault.content("Inbox/other.md")).toBe("text of c");
+	});
+
 	it("refuses to run without folders", async () => {
 		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
 
-		await expect(job().run({ folders: [], tags: ["transcribe"] }, new AbortController().signal)).rejects.toThrow("папки");
+		await expect(job().run({ ...OPTIONS, folders: [] }, new AbortController().signal)).rejects.toThrow("папки");
 		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
 	});
 

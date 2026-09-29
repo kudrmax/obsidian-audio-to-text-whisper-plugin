@@ -1,5 +1,6 @@
 import { App, FileSystemAdapter, TFile, getAllTags, getLinkpath, normalizePath } from "obsidian";
 import { AudioEmbed, VaultGateway } from "../domain/ports";
+import { removeInlineTags } from "../domain/removeInlineTags";
 import { replaceReference } from "../domain/replaceReference";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "webm", "flac", "aac", "3gp", "mp4"]);
@@ -72,6 +73,23 @@ export class ObsidianVaultGateway implements VaultGateway {
 
 	async trash(path: string): Promise<void> {
 		await this.app.vault.trash(this.file(path), true);
+	}
+
+	async removeTags(notePath: string, tags: readonly string[]): Promise<void> {
+		const file = this.file(notePath);
+		const unwanted = new Set(tags.map((t) => t.replace(/^#/, "").toLowerCase()));
+		await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+			for (const key of ["tags", "tag"]) {
+				const value = frontmatter[key];
+				if (value === undefined) continue;
+				const list = Array.isArray(value) ? value.map(String) : String(value).split(/[,\s]+/);
+				const kept = list.filter((t) => t && !unwanted.has(t.replace(/^#/, "").toLowerCase()));
+				if (kept.length === list.length) continue;
+				if (kept.length === 0) delete frontmatter[key];
+				else frontmatter[key] = kept;
+			}
+		});
+		await this.app.vault.process(file, (content) => removeInlineTags(content, tags));
 	}
 
 	private tagsOf(file: TFile): string[] {

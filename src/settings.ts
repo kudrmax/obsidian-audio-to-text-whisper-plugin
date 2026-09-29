@@ -3,6 +3,7 @@ export type WhisperEngine = "whisper.cpp" | "openai-whisper";
 export interface TranscriberSettings {
 	folder: string;
 	tags: string[];
+	removeTagsAfter: boolean;
 	engine: WhisperEngine;
 	whisperPath: string;
 	ffmpegPath: string;
@@ -13,6 +14,7 @@ export interface TranscriberSettings {
 export const DEFAULT_SETTINGS: TranscriberSettings = {
 	folder: "",
 	tags: ["transcribe"],
+	removeTagsAfter: true,
 	engine: "whisper.cpp",
 	whisperPath: "",
 	ffmpegPath: "",
