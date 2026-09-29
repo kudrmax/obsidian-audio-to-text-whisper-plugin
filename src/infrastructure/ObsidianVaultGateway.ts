@@ -1,32 +1,30 @@
 import { App, FileSystemAdapter, TFile, getAllTags, getLinkpath, normalizePath } from "obsidian";
 import { AudioEmbed, VaultGateway } from "../domain/ports";
+import { replaceReference } from "../domain/replaceReference";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "webm", "flac", "aac", "3gp", "mp4"]);
 
 export class ObsidianVaultGateway implements VaultGateway {
 	constructor(private readonly app: App) {}
 
-	findTaggedNotes(folders: readonly string[], tag: string): string[] {
-		const wanted = `#${tag.replace(/^#/, "").toLowerCase()}`;
-		const prefixes = folders.map((f) => normalizePath(f)).filter((f) => f !== "/" && f !== "");
+	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
+		const prefixes = folders.map((f) => normalizePath(f));
+		const wanted = new Set(tags.map((t) => `#${t.replace(/^#/, "").toLowerCase()}`));
 		return this.app.vault
 			.getMarkdownFiles()
-			.filter((file) => prefixes.length === 0 || prefixes.some((p) => file.path.startsWith(`${p}/`)))
-			.filter((file) => {
-				const cache = this.app.metadataCache.getFileCache(file);
-				const tags = cache ? getAllTags(cache) ?? [] : [];
-				return tags.some((t) => t.toLowerCase() === wanted);
-			})
+			.filter((file) => prefixes.some((p) => p === "/" || file.path.startsWith(`${p}/`)))
+			.filter((file) => wanted.size === 0 || this.tagsOf(file).some((t) => wanted.has(t)))
 			.map((file) => file.path);
 	}
 
 	findAudioEmbeds(notePath: string): AudioEmbed[] {
-		const embeds = this.app.metadataCache.getCache(notePath)?.embeds ?? [];
+		const cache = this.app.metadataCache.getCache(notePath);
+		const references = [...(cache?.embeds ?? []), ...(cache?.links ?? [])];
 		const result: AudioEmbed[] = [];
-		for (const embed of embeds) {
-			const target = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(embed.link), notePath);
+		for (const reference of references) {
+			const target = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(reference.link), notePath);
 			if (target && AUDIO_EXTENSIONS.has(target.extension.toLowerCase())) {
-				result.push({ linkText: embed.original, audioPath: target.path });
+				result.push({ linkText: reference.original, audioPath: target.path });
 			}
 		}
 		return result;
@@ -47,9 +45,9 @@ export class ObsidianVaultGateway implements VaultGateway {
 	async replaceInNote(notePath: string, search: string, replacement: string): Promise<boolean> {
 		let replaced = false;
 		await this.app.vault.process(this.file(notePath), (content) => {
-			if (!content.includes(search)) return content;
-			replaced = true;
-			return content.split(search).join(replacement);
+			const updated = replaceReference(content, search, replacement);
+			replaced = updated !== content;
+			return updated;
 		});
 		return replaced;
 	}
@@ -74,6 +72,11 @@ export class ObsidianVaultGateway implements VaultGateway {
 
 	async trash(path: string): Promise<void> {
 		await this.app.vault.trash(this.file(path), true);
+	}
+
+	private tagsOf(file: TFile): string[] {
+		const cache = this.app.metadataCache.getFileCache(file);
+		return (cache ? getAllTags(cache) ?? [] : []).map((t) => t.toLowerCase());
 	}
 
 	private sourcesLinkingTo(path: string): string[] {

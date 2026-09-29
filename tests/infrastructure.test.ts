@@ -30,11 +30,11 @@ describe("PluginStore", () => {
 
 	it("fills missing settings with defaults", async () => {
 		const persistence = new MemoryPersistence();
-		persistence.data = { settings: { tag: "voice" } };
+		persistence.data = { settings: { tags: ["voice"] } };
 		const store = new PluginStore(persistence);
 		await store.load();
 
-		expect(store.settings).toEqual({ ...DEFAULT_SETTINGS, tag: "voice" });
+		expect(store.settings).toEqual({ ...DEFAULT_SETTINGS, tags: ["voice"] });
 	});
 });
 

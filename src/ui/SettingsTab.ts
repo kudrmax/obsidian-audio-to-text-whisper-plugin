@@ -14,21 +14,24 @@ export class SettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Папки")
-			.setDesc("По одной на строку, поиск рекурсивный. Пусто — весь vault.")
+			.setDesc("Где искать заметки с аудио. По одной на строку, вложенные папки тоже обрабатываются. «/» — весь vault. Без папок плагин не запускается.")
 			.addTextArea((text) =>
 				text
 					.setPlaceholder("Inbox\nJournal/Voice")
 					.setValue(settings.folders.join("\n"))
-					.onChange((value) =>
-						this.store.updateSettings({ folders: value.split("\n").map((f) => f.trim()).filter(Boolean) }),
-					),
+					.onChange((value) => this.store.updateSettings({ folders: SettingsTab.lines(value) })),
 			);
 
 		new Setting(containerEl)
-			.setName("Тег")
-			.setDesc("Заметки с этим тегом (в тексте или frontmatter) будут обработаны. Без #.")
-			.addText((text) =>
-				text.setValue(settings.tag).onChange((value) => this.store.updateSettings({ tag: value.trim().replace(/^#/, "") })),
+			.setName("Теги (необязательно)")
+			.setDesc("По одному на строку, без #. Обрабатываются заметки с любым из тегов. Пусто — всё аудио в указанных папках.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder("transcribe")
+					.setValue(settings.tags.join("\n"))
+					.onChange((value) =>
+						this.store.updateSettings({ tags: SettingsTab.lines(value).map((t) => t.replace(/^#/, "")) }),
+					),
 			);
 
 		new Setting(containerEl)
@@ -76,5 +79,9 @@ export class SettingsTab extends PluginSettingTab {
 			.setName("Язык")
 			.setDesc("Код языка (ru, en, …) или auto.")
 			.addText((text) => text.setValue(settings.language).onChange((value) => this.store.updateSettings({ language: value.trim() })));
+	}
+
+	private static lines(value: string): string[] {
+		return value.split("\n").map((line) => line.trim()).filter(Boolean);
 	}
 }

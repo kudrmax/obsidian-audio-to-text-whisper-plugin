@@ -1,3 +1,4 @@
+import { replaceReference } from "../src/domain/replaceReference";
 import {
 	AudioEmbed,
 	DeletionJournal,
@@ -34,15 +35,15 @@ export class FakeVault implements VaultGateway {
 		return this.notes.get(path)!.content;
 	}
 
-	findTaggedNotes(folders: readonly string[], tag: string): string[] {
+	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
 		return [...this.notes.entries()]
-			.filter(([path]) => folders.length === 0 || folders.some((f) => path.startsWith(`${f}/`)))
-			.filter(([, note]) => note.tags.includes(tag))
+			.filter(([path]) => folders.some((f) => path.startsWith(`${f}/`)))
+			.filter(([, note]) => tags.length === 0 || note.tags.some((t) => tags.includes(t)))
 			.map(([path]) => path);
 	}
 
 	findAudioEmbeds(notePath: string): AudioEmbed[] {
-		const matches = this.content(notePath).matchAll(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g);
+		const matches = this.content(notePath).matchAll(/!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g);
 		return [...matches]
 			.map((m) => ({ linkText: m[0], audioPath: this.resolve(m[1]) }))
 			.filter((e): e is AudioEmbed => e.audioPath !== undefined);
@@ -59,9 +60,10 @@ export class FakeVault implements VaultGateway {
 	async replaceInNote(notePath: string, search: string, replacement: string): Promise<boolean> {
 		if (this.failOnReplace) throw new Error("crash on replace");
 		const note = this.notes.get(notePath)!;
-		if (!note.content.includes(search)) return false;
-		note.content = note.content.split(search).join(replacement);
-		return true;
+		const updated = replaceReference(note.content, search, replacement);
+		const replaced = updated !== note.content;
+		note.content = updated;
+		return replaced;
 	}
 
 	async noteContains(notePath: string, text: string): Promise<boolean> {

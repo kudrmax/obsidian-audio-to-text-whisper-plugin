@@ -9,7 +9,7 @@ export interface TranscriptionTask {
 }
 
 export interface VaultGateway {
-	findTaggedNotes(folders: readonly string[], tag: string): string[];
+	findNotes(folders: readonly string[], tags: readonly string[]): string[];
 	findAudioEmbeds(notePath: string): AudioEmbed[];
 	exists(path: string): boolean;
 	absolutePath(path: string): string;

@@ -16,7 +16,7 @@ export default class WhisperTranscriberPlugin extends Plugin {
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new SettingsTab(this.app, this, this.store));
 		this.addRibbonIcon("mic", "Распознать аудио (Whisper)", () => void this.transcribe());
-		this.addCommand({ id: "transcribe", name: "Распознать аудио в заметках с тегом", callback: () => void this.transcribe() });
+		this.addCommand({ id: "transcribe", name: "Распознать аудио в заметках", callback: () => void this.transcribe() });
 		this.addCommand({
 			id: "cancel",
 			name: "Остановить распознавание",
@@ -38,10 +38,6 @@ export default class WhisperTranscriberPlugin extends Plugin {
 			return;
 		}
 		const settings = this.store.settings;
-		if (!settings.tag) {
-			new Notice("Whisper: укажите тег в настройках плагина");
-			return;
-		}
 
 		this.running = new AbortController();
 		try {
@@ -51,7 +47,7 @@ export default class WhisperTranscriberPlugin extends Plugin {
 				this.store,
 				new ProgressNotice(this.statusBar),
 			);
-			await job.run({ folders: settings.folders, tag: settings.tag }, this.running.signal);
+			await job.run({ folders: settings.folders, tags: settings.tags }, this.running.signal);
 		} catch (error) {
 			new Notice(`Whisper: ${error instanceof Error ? error.message : String(error)}`, 0);
 		} finally {

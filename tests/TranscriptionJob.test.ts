@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TranscriptionJob } from "../src/domain/TranscriptionJob";
 import { FakeTranscriber, FakeVault, MemoryJournal, RecordingProgress } from "./fakes";
 
-const OPTIONS = { folders: ["Inbox"], tag: "transcribe" };
+const OPTIONS = { folders: ["Inbox"], tags: ["transcribe"] };
 
 describe("TranscriptionJob", () => {
 	let vault: FakeVault;
@@ -42,6 +42,56 @@ describe("TranscriptionJob", () => {
 
 		expect(report.total).toBe(0);
 		expect(vault.trashed).toEqual([]);
+	});
+
+	it("processes every note in configured folders when no tags are set", async () => {
+		vault
+			.addAudio("att/a.webm")
+			.addAudio("att/b.webm")
+			.addNote("Inbox/untagged.md", "![[a.webm]]")
+			.addNote("Inbox/Sub/other.md", "![[b.webm]]", ["other"])
+			.addNote("Elsewhere/n.md", "![[a.webm]]");
+
+		const report = await job().run({ folders: ["Inbox"], tags: [] }, new AbortController().signal);
+
+		expect(report.total).toBe(2);
+		expect(vault.content("Inbox/untagged.md")).toBe("text of a");
+		expect(vault.content("Inbox/Sub/other.md")).toBe("text of b");
+	});
+
+	it("matches notes having any of the configured tags", async () => {
+		vault
+			.addAudio("att/a.webm")
+			.addAudio("att/b.webm")
+			.addAudio("att/c.webm")
+			.addNote("Inbox/one.md", "![[a.webm]]", ["voice"])
+			.addNote("Inbox/two.md", "![[b.webm]]", ["transcribe"])
+			.addNote("Inbox/three.md", "![[c.webm]]", ["other"]);
+
+		const report = await job().run({ folders: ["Inbox"], tags: ["voice", "transcribe"] }, new AbortController().signal);
+
+		expect(report.total).toBe(2);
+		expect(vault.content("Inbox/three.md")).toBe("![[c.webm]]");
+	});
+
+	it("replaces both embeds and plain links to the same audio", async () => {
+		vault
+			.addAudio("All files/rec.m4a")
+			.addNote("Inbox/n.md", "[[All files/rec.m4a]]\n![[All files/rec.m4a]]", ["transcribe"]);
+
+		const report = await run();
+
+		expect(report).toMatchObject({ total: 2, done: 2 });
+		expect(vault.content("Inbox/n.md")).toBe("text of rec\ntext of rec");
+		expect(transcriber.calls).toHaveLength(1);
+		expect(vault.trashed).toEqual(["All files/rec.m4a"]);
+	});
+
+	it("refuses to run without folders", async () => {
+		vault.addAudio("att/a.webm").addNote("Inbox/n.md", "![[a.webm]]");
+
+		await expect(job().run({ folders: [], tags: [] }, new AbortController().signal)).rejects.toThrow("папки");
+		expect(vault.content("Inbox/n.md")).toBe("![[a.webm]]");
 	});
 
 	it("keeps note and audio untouched when whisper fails", async () => {

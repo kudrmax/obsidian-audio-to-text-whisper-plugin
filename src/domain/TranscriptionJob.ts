@@ -10,7 +10,7 @@ import {
 
 export interface JobOptions {
 	readonly folders: readonly string[];
-	readonly tag: string;
+	readonly tags: readonly string[];
 }
 
 class CancelledError extends Error {}
@@ -31,6 +31,9 @@ export class TranscriptionJob {
 	) {}
 
 	async run(options: JobOptions, signal: AbortSignal): Promise<JobReport> {
+		if (options.folders.length === 0) {
+			throw new Error("не указаны папки для поиска аудио");
+		}
 		const recoveredDeletions = await this.completePendingDeletions();
 		const tasks = this.collectTasks(options);
 		const failures: TaskFailure[] = [];
@@ -67,7 +70,7 @@ export class TranscriptionJob {
 
 	private collectTasks(options: JobOptions): TranscriptionTask[] {
 		const tasks: TranscriptionTask[] = [];
-		for (const notePath of this.vault.findTaggedNotes(options.folders, options.tag)) {
+		for (const notePath of this.vault.findNotes(options.folders, options.tags)) {
 			const seen = new Set<string>();
 			for (const embed of this.vault.findAudioEmbeds(notePath)) {
 				if (seen.has(embed.linkText)) continue;
