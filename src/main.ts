@@ -16,7 +16,7 @@ export default class AudioToTextPlugin extends Plugin {
 		await this.store.load();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new SettingsTab(this.app, this, this.store));
-		this.addRibbonIcon("mic", "Transcribe tagged audio", () => void this.transcribe());
+		this.addRibbonIcon("audio-lines", "Transcribe tagged audio", () => void this.transcribe());
 		this.addCommand({ id: "transcribe", name: "Transcribe tagged audio", callback: () => void this.transcribe() });
 		this.addCommand({
 			id: "cancel",
