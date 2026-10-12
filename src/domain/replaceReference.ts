@@ -2,12 +2,15 @@ function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** A plain link `[[x]]` is a substring of the embed `![[x]]`, so it must not match when preceded by `!`. */
-export function referencePattern(reference: string): RegExp {
-	const guard = reference.startsWith("!") ? "" : "(?<!!)";
-	return new RegExp(guard + escapeRegExp(reference), "g");
+/**
+ * Matches the references in this order with only whitespace between them.
+ * A plain link `[[x]]` is a substring of the embed `![[x]]`, so it must not match when preceded by `!`.
+ */
+export function referencePattern(references: readonly string[]): RegExp {
+	const guard = references[0].startsWith("!") ? "" : "(?<!!)";
+	return new RegExp(guard + references.map(escapeRegExp).join("\\s*"), "g");
 }
 
-export function replaceReference(content: string, reference: string, replacement: string): string {
-	return content.replace(referencePattern(reference), () => replacement);
+export function replaceReference(content: string, references: readonly string[], replacement: string): string {
+	return content.replace(referencePattern(references), () => replacement);
 }

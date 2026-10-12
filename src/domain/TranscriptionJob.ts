@@ -2,6 +2,7 @@ import { InlineTags } from "./InlineTags";
 import { TaggedAudioLines } from "./TaggedAudioLines";
 import {
 	AudioDurations,
+	AudioEmbed,
 	DeletionJournal,
 	JobReport,
 	ProgressListener,
@@ -21,6 +22,7 @@ class CancelledError extends Error {}
 
 /**
  * Only audio references with a tag on the same line are processed.
+ * References standing side by side are parts of one recording and become one text.
  * Per-audio order is what makes a run safe to interrupt at any point:
  * transcribe → journal the pending deletion → replace embed in note → trash orphaned audio → clear journal.
  * The audio is trashed only when nothing references it anymore, so it can never be lost before its text is saved.
@@ -84,10 +86,11 @@ export class TranscriptionJob {
 		for (const notePath of this.vault.findNotes(options.folders, options.tags)) {
 			const content = (await this.vault.readNote(notePath)) ?? "";
 			const seen = new Set<string>();
-			for (const embed of this.vault.findAudioEmbeds(notePath)) {
-				if (seen.has(embed.linkText) || !lines.contains(content, embed.linkText)) continue;
-				seen.add(embed.linkText);
-				tasks.push({ notePath, embed });
+			for (const embeds of lines.groups(content, this.vault.findAudioEmbeds(notePath))) {
+				const key = linkTexts(embeds).join("\n");
+				if (seen.has(key)) continue;
+				seen.add(key);
+				tasks.push({ notePath, embeds });
 			}
 		}
 		return tasks;
@@ -97,15 +100,15 @@ export class TranscriptionJob {
 		const probed = new Set<string>();
 		const result: TranscriptionTask[] = [];
 		for (const task of tasks) {
-			const { audioPath } = task.embed;
-			if (probed.has(audioPath)) {
-				result.push({ ...task, durationSeconds: 0 });
-				continue;
+			let durationSeconds: number | undefined = 0;
+			for (const { audioPath } of task.embeds) {
+				if (probed.has(audioPath)) continue;
+				probed.add(audioPath);
+				const seconds = this.vault.exists(audioPath)
+					? await this.durations.secondsOf(this.vault.absolutePath(audioPath))
+					: undefined;
+				durationSeconds = seconds === undefined || durationSeconds === undefined ? undefined : durationSeconds + seconds;
 			}
-			probed.add(audioPath);
-			const durationSeconds = this.vault.exists(audioPath)
-				? await this.durations.secondsOf(this.vault.absolutePath(audioPath))
-				: undefined;
 			result.push({ ...task, durationSeconds });
 		}
 		return result;
@@ -117,28 +120,48 @@ export class TranscriptionJob {
 		signal: AbortSignal,
 		onProgress: (fraction: number) => void,
 	): Promise<void> {
-		const { audioPath, linkText } = task.embed;
-		if (!this.vault.exists(audioPath)) {
-			throw new Error(`audio file not found: ${audioPath}`);
+		const missing = task.embeds.find((embed) => !this.vault.exists(embed.audioPath));
+		if (missing) {
+			throw new Error(`audio file not found: ${missing.audioPath}`);
 		}
 
-		const text = await this.transcriptOf(audioPath, signal, onProgress);
+		const text = await this.transcriptOfParts(task.embeds, signal, onProgress);
 		if (signal.aborted) throw new CancelledError();
 
-		await this.journal.add({ audioPath, notePath: task.notePath, transcript: text });
+		const references = linkTexts(task.embeds);
+		for (const { audioPath } of task.embeds) {
+			await this.journal.add({ audioPath, notePath: task.notePath, transcript: text });
+		}
 		let replaced = false;
 		await this.vault.editNote(task.notePath, (content) => {
-			const updated = lines.replace(content, linkText, text);
+			const updated = lines.replace(content, references, text);
 			replaced = updated !== content;
 			return updated;
 		});
 		if (!replaced) {
-			await this.journal.remove(audioPath);
+			for (const { audioPath } of task.embeds) await this.journal.remove(audioPath);
 			throw new Error(
-				`the line with ${linkText} and the tag was changed during transcription; the audio was kept, run again`,
+				`the line with ${references.join(" ")} and the tag was changed during transcription; the audio was kept, run again`,
 			);
 		}
-		await this.trashIfOrphaned(audioPath);
+		for (const { audioPath } of task.embeds) await this.trashIfOrphaned(audioPath);
+	}
+
+	private async transcriptOfParts(
+		embeds: readonly AudioEmbed[],
+		signal: AbortSignal,
+		onProgress: (fraction: number) => void,
+	): Promise<string> {
+		const texts: string[] = [];
+		for (const [index, { audioPath }] of embeds.entries()) {
+			if (signal.aborted) throw new CancelledError();
+			texts.push(await this.transcriptOf(audioPath, signal, (fraction) => onProgress((index + fraction) / embeds.length)));
+		}
+		const text = texts.filter((part) => part.length > 0).join(" ");
+		if (text.length === 0) {
+			throw new Error("Whisper returned empty text; the audio was kept");
+		}
+		return text;
 	}
 
 	private async transcriptOf(audioPath: string, signal: AbortSignal, onProgress: (fraction: number) => void): Promise<string> {
@@ -146,9 +169,6 @@ export class TranscriptionJob {
 		if (cached !== undefined) return cached;
 
 		const text = (await this.transcriber.transcribe(this.vault.absolutePath(audioPath), signal, onProgress)).trim();
-		if (text.length === 0) {
-			throw new Error("Whisper returned empty text; the audio was kept");
-		}
 		this.transcripts.set(audioPath, text);
 		return text;
 	}
@@ -175,4 +195,8 @@ export class TranscriptionJob {
 		await this.journal.remove(audioPath);
 		return trashed;
 	}
+}
+
+function linkTexts(embeds: readonly AudioEmbed[]): string[] {
+	return embeds.map((embed) => embed.linkText);
 }
