@@ -277,4 +277,84 @@ describe("TranscriptionJob", () => {
 			expect(vault.trashed).toEqual(["att/a.webm"]);
 		});
 	});
+
+	describe("split recordings", () => {
+		const SPLIT = "- 21:37 ![[rec (1).m4a]] ![[rec (2).m4a]] ![[rec (3).m4a]] #transcribe";
+
+		beforeEach(() => {
+			vault.addAudio("att/rec (1).m4a").addAudio("att/rec (2).m4a").addAudio("att/rec (3).m4a");
+		});
+
+		it("joins the transcripts of side-by-side parts into one paragraph", async () => {
+			vault.addNote("Inbox/n.md", SPLIT);
+
+			const report = await run({ removeTagsAfter: true });
+
+			expect(report).toMatchObject({ total: 1, done: 1 });
+			expect(vault.content("Inbox/n.md")).toBe("- 21:37 text of rec (1) text of rec (2) text of rec (3)");
+			expect(transcriber.calls).toEqual(["/vault/att/rec (1).m4a", "/vault/att/rec (2).m4a", "/vault/att/rec (3).m4a"]);
+			expect(vault.trashed).toEqual(["att/rec (1).m4a", "att/rec (2).m4a", "att/rec (3).m4a"]);
+			expect(journal.list()).toEqual([]);
+		});
+
+		it("transcribes references separated by other text as separate recordings", async () => {
+			vault.addNote("Inbox/n.md", "![[rec (1).m4a]] and ![[rec (2).m4a]] #transcribe");
+
+			const report = await run();
+
+			expect(report.total).toBe(2);
+			expect(vault.content("Inbox/n.md")).toBe("text of rec (1) and text of rec (2) #transcribe");
+		});
+
+		it("sums the durations of the parts", async () => {
+			durations = new FixedDurations({ "/vault/att/rec (1).m4a": 270, "/vault/att/rec (2).m4a": 270, "/vault/att/rec (3).m4a": 60 });
+			vault.addNote("Inbox/n.md", SPLIT);
+
+			await run();
+
+			expect(progress.started.map((t) => t.durationSeconds)).toEqual([600]);
+		});
+
+		it("reports progress across all parts", async () => {
+			vault.addNote("Inbox/n.md", "![[rec (1).m4a]] ![[rec (2).m4a]] #transcribe");
+
+			await run();
+
+			expect(progress.events.filter((e) => e.startsWith("progress"))).toEqual(["progress 1 0.25", "progress 1 0.75"]);
+		});
+
+		it("skips a silent part", async () => {
+			transcriber = new FakeTranscriber({ "/vault/att/rec (2).m4a": "  " });
+			vault.addNote("Inbox/n.md", SPLIT);
+
+			await run();
+
+			expect(vault.content("Inbox/n.md")).toBe("- 21:37 text of rec (1) text of rec (3) #transcribe");
+		});
+
+		it("keeps the note and every part when one part fails", async () => {
+			transcriber.failFor("/vault/att/rec (2).m4a");
+			vault.addNote("Inbox/n.md", SPLIT);
+
+			const report = await run();
+
+			expect(report.failures).toHaveLength(1);
+			expect(vault.content("Inbox/n.md")).toBe(SPLIT);
+			expect(vault.trashed).toEqual([]);
+		});
+
+		it("trashes every part left after a crash between saving text and trashing", async () => {
+			vault.addNote("Inbox/n.md", SPLIT);
+			vault.failOnTrash = true;
+			await run();
+			expect(vault.content("Inbox/n.md")).toBe("- 21:37 text of rec (1) text of rec (2) text of rec (3) #transcribe");
+
+			vault.failOnTrash = false;
+			const report = await run();
+
+			expect(report.recoveredDeletions).toBe(3);
+			expect(vault.trashed).toEqual(["att/rec (1).m4a", "att/rec (2).m4a", "att/rec (3).m4a"]);
+			expect(journal.list()).toEqual([]);
+		});
+	});
 });

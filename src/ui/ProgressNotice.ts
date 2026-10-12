@@ -48,7 +48,7 @@ export class ProgressNotice implements ProgressListener {
 		this.completed++;
 		if (error) {
 			this.failed++;
-			console.error(`[audio-to-text-whisper] ${task.notePath} → ${task.embed.audioPath}: ${error}`);
+			console.error(`[audio-to-text-whisper] ${task.notePath} → ${audioPaths(task)}: ${error}`);
 		}
 		this.render();
 	}
@@ -67,7 +67,7 @@ export class ProgressNotice implements ProgressListener {
 		const total = this.tasks.length;
 		const percent = Math.floor(this.estimator.fraction() * 100);
 		const task = this.tasks[this.currentIndex];
-		const name = task?.embed.audioPath.split("/").pop() ?? "";
+		const name = task ? displayName(task) : "";
 		const length = task?.durationSeconds ? ` (${formatDuration(task.durationSeconds)})` : "";
 		const lines = [
 			`${TITLE}: ${this.completed}/${total} done · ${percent}%${this.failed ? ` · ${this.failed} failed` : ""}`,
@@ -95,8 +95,17 @@ export class ProgressNotice implements ProgressListener {
 			lines.push(`Moved to trash after the previous interrupted run: ${report.recoveredDeletions}`);
 		}
 		for (const failure of report.failures) {
-			lines.push(`✗ ${failure.task.embed.audioPath}: ${failure.message}`);
+			lines.push(`✗ ${audioPaths(failure.task)}: ${failure.message}`);
 		}
 		return lines.join("\n");
 	}
+}
+
+function audioPaths(task: TranscriptionTask): string {
+	return task.embeds.map((embed) => embed.audioPath).join(", ");
+}
+
+function displayName(task: TranscriptionTask): string {
+	const name = task.embeds[0].audioPath.split("/").pop() ?? "";
+	return task.embeds.length > 1 ? `${name} + ${task.embeds.length - 1} more parts` : name;
 }

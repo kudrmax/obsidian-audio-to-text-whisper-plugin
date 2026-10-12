@@ -5,7 +5,8 @@ export interface AudioEmbed {
 
 export interface TranscriptionTask {
 	readonly notePath: string;
-	readonly embed: AudioEmbed;
+	/** Parts of one recording, transcribed in order and replaced by a single text. */
+	readonly embeds: readonly AudioEmbed[];
 	/** Zero for repeated references to already transcribed audio; undefined when the duration is unknown. */
 	readonly durationSeconds?: number;
 }
