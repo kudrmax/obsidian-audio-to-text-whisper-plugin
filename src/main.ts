@@ -1,5 +1,5 @@
 import { Notice, Plugin } from "obsidian";
-import { TranscriptionJob } from "./domain/TranscriptionJob";
+import { JobOptions, TranscriptionJob } from "./domain/TranscriptionJob";
 import { FfprobeAudioDurations } from "./infrastructure/FfprobeAudioDurations";
 import { ObsidianVaultGateway } from "./infrastructure/ObsidianVaultGateway";
 import { PluginStore } from "./infrastructure/PluginStore";
@@ -16,8 +16,8 @@ export default class AudioToTextPlugin extends Plugin {
 		await this.store.load();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new SettingsTab(this.app, this, this.store));
-		this.addRibbonIcon("audio-lines", "Transcribe tagged audio", () => void this.transcribe());
-		this.addCommand({ id: "transcribe", name: "Transcribe tagged audio", callback: () => void this.transcribe() });
+		this.addRibbonIcon("audio-lines", "Transcribe audio", () => void this.transcribe());
+		this.addCommand({ id: "transcribe", name: "Transcribe audio", callback: () => void this.transcribe() });
 		this.addCommand({
 			id: "cancel",
 			name: "Stop transcription",
@@ -31,6 +31,17 @@ export default class AudioToTextPlugin extends Plugin {
 
 	override onunload(): void {
 		this.running?.abort();
+	}
+
+	private jobOptions(): JobOptions {
+		const settings = this.store.settings;
+		const folder = settings.folder.trim();
+		return {
+			tagged: settings.transcribeTagged
+				? { folders: folder ? [folder] : [], tags: settings.tags, removeTagsAfter: settings.removeTagsAfter }
+				: undefined,
+			dailyNotesFrom: settings.transcribeDailyNotes ? settings.dailyNotesFrom : undefined,
+		};
 	}
 
 	private async transcribe(): Promise<void> {
@@ -50,8 +61,7 @@ export default class AudioToTextPlugin extends Plugin {
 				this.store,
 				new ProgressNotice(this.statusBar, this.store.speedFor(speedKey), (speed) => void this.store.saveSpeed(speedKey, speed)),
 			);
-			const folders = settings.folder.trim() ? [settings.folder.trim()] : [];
-			await job.run({ folders, tags: settings.tags, removeTagsAfter: settings.removeTagsAfter }, this.running.signal);
+			await job.run(this.jobOptions(), this.running.signal);
 		} catch (error) {
 			new Notice(`Audio to Text: ${error instanceof Error ? error.message : String(error)}`, 0);
 		} finally {

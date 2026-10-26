@@ -1,5 +1,6 @@
 import { App, FileSystemAdapter, TFile, getAllTags, getLinkpath, normalizePath } from "obsidian";
 import { AudioEmbed, VaultGateway } from "../domain/ports";
+import { dailyNotesConfig, dailyNotesOf } from "./ObsidianDailyNotes";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "webm", "flac", "aac", "3gp", "mp4"]);
 
@@ -14,6 +15,15 @@ export class ObsidianVaultGateway implements VaultGateway {
 			.filter((file) => prefixes.some((p) => p === "/" || file.path.startsWith(`${p}/`)))
 			.filter((file) => this.tagsOf(file).some((t) => wanted.has(t)))
 			.map((file) => file.path);
+	}
+
+	findDailyNotes(fromDate: string): string[] {
+		const config = dailyNotesConfig(this.app);
+		if (!config) {
+			throw new Error("daily notes are not set up: enable the Daily notes core plugin in Obsidian");
+		}
+		const paths = this.app.vault.getMarkdownFiles().map((file) => file.path);
+		return dailyNotesOf(config).datedFrom(fromDate, paths);
 	}
 
 	findAudioEmbeds(notePath: string): AudioEmbed[] {

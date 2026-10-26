@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { JobOptions, TranscriptionJob } from "../src/domain/TranscriptionJob";
+import { JobOptions, TagRule, TranscriptionJob } from "../src/domain/TranscriptionJob";
 import { FakeTranscriber, FakeVault, FixedDurations, MemoryJournal, RecordingProgress } from "./fakes";
 
-const OPTIONS: JobOptions = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
+const TAGGED: TagRule = { folders: ["Inbox"], tags: ["transcribe"], removeTagsAfter: false };
 
 describe("TranscriptionJob", () => {
 	let vault: FakeVault;
@@ -11,8 +11,10 @@ describe("TranscriptionJob", () => {
 	let progress: RecordingProgress;
 	let durations: FixedDurations;
 
-	const run = (options: Partial<JobOptions> = {}, signal = new AbortController().signal) =>
-		new TranscriptionJob(vault, transcriber, durations, journal, progress).run({ ...OPTIONS, ...options }, signal);
+	const runWith = (options: JobOptions, signal = new AbortController().signal) =>
+		new TranscriptionJob(vault, transcriber, durations, journal, progress).run(options, signal);
+	const run = (tagged: Partial<TagRule> = {}, signal = new AbortController().signal) =>
+		runWith({ tagged: { ...TAGGED, ...tagged } }, signal);
 
 	beforeEach(() => {
 		vault = new FakeVault();
@@ -355,6 +357,56 @@ describe("TranscriptionJob", () => {
 			expect(report.recoveredDeletions).toBe(3);
 			expect(vault.trashed).toEqual(["att/rec (1).m4a", "att/rec (2).m4a", "att/rec (3).m4a"]);
 			expect(journal.list()).toEqual([]);
+		});
+	});
+
+	describe("daily notes from a date", () => {
+		const DAILY = "Journal/Daily notes";
+
+		it("transcribes every audio in daily notes on or after the date, no tag needed", async () => {
+			vault
+				.addAudio("att/new.m4a")
+				.addAudio("att/same.m4a")
+				.addAudio("att/old.m4a")
+				.addNote(`${DAILY}/2026-10-26.md`, "- 19:23 ![[new.m4a]]")
+				.addNote(`${DAILY}/2026-10-01.md`, "![[same.m4a]]")
+				.addNote(`${DAILY}/2026-07-18.md`, "![[old.m4a]]");
+
+			const report = await runWith({ dailyNotesFrom: "2026-10-01" });
+
+			expect(report).toMatchObject({ total: 2, done: 2 });
+			expect(vault.content(`${DAILY}/2026-10-26.md`)).toBe("- 19:23 text of new");
+			expect(vault.content(`${DAILY}/2026-10-01.md`)).toBe("text of same");
+			expect(vault.content(`${DAILY}/2026-07-18.md`)).toBe("![[old.m4a]]");
+			expect(vault.audio.has("att/old.m4a")).toBe(true);
+		});
+
+		it("ignores untagged audio outside daily notes", async () => {
+			vault.addAudio("att/a.m4a").addNote("Inbox/2026-10-26.md", "![[a.m4a]]");
+
+			expect((await runWith({ dailyNotesFrom: "2026-01-01" })).total).toBe(0);
+		});
+
+		it("processes a note matched by both rules once, every line of it, and removes the tag", async () => {
+			vault.addAudio("att/a.m4a").addNote(`${DAILY}/2026-10-26.md`, "- ![[a.m4a]] #transcribe\n- ![[a.m4a]]");
+
+			const report = await runWith({
+				tagged: { folders: [DAILY], tags: ["transcribe"], removeTagsAfter: true },
+				dailyNotesFrom: "2026-10-01",
+			});
+
+			expect(report).toMatchObject({ total: 1, done: 1 });
+			expect(transcriber.calls).toHaveLength(1);
+			expect(vault.content(`${DAILY}/2026-10-26.md`)).toBe("- text of a\n- text of a");
+		});
+
+		it("rejects a date that is not YYYY-MM-DD", async () => {
+			await expect(runWith({ dailyNotesFrom: "" })).rejects.toThrow("date");
+			await expect(runWith({ dailyNotesFrom: "26.10.2026" })).rejects.toThrow("date");
+		});
+
+		it("requires at least one rule", async () => {
+			await expect(runWith({})).rejects.toThrow("Tagged audio");
 		});
 	});
 });

@@ -44,6 +44,13 @@ export class FakeVault implements VaultGateway {
 			.map(([path]) => path);
 	}
 
+	findDailyNotes(fromDate: string): string[] {
+		const folder = "Journal/Daily notes/";
+		return [...this.notes.keys()]
+			.filter((path) => path.startsWith(folder))
+			.filter((path) => path.slice(folder.length, -3) >= fromDate);
+	}
+
 	findAudioEmbeds(notePath: string): AudioEmbed[] {
 		const matches = this.content(notePath).matchAll(/!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g);
 		return [...matches]

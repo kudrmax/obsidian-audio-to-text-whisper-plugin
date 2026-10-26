@@ -13,6 +13,8 @@ export interface TranscriptionTask {
 
 export interface VaultGateway {
 	findNotes(folders: readonly string[], tags: readonly string[]): string[];
+	/** Daily notes whose name is a date on or after `fromDate` (YYYY-MM-DD); fails when daily notes are not set up. */
+	findDailyNotes(fromDate: string): string[];
 	findAudioEmbeds(notePath: string): AudioEmbed[];
 	exists(path: string): boolean;
 	absolutePath(path: string): string;

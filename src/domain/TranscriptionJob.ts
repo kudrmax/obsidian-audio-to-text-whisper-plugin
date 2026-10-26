@@ -1,3 +1,5 @@
+import { AllAudioLines } from "./AllAudioLines";
+import { AudioLines } from "./AudioLines";
 import { InlineTags } from "./InlineTags";
 import { TaggedAudioLines } from "./TaggedAudioLines";
 import {
@@ -12,16 +14,29 @@ import {
 	VaultGateway,
 } from "./ports";
 
-export interface JobOptions {
+export interface TagRule {
 	readonly folders: readonly string[];
 	readonly tags: readonly string[];
 	readonly removeTagsAfter: boolean;
 }
 
+/** At least one rule is required; a note matched by both is processed once, with every audio in it. */
+export interface JobOptions {
+	readonly tagged?: TagRule;
+	/** Daily notes dated on or after this day (YYYY-MM-DD) are processed whole, no tag needed. */
+	readonly dailyNotesFrom?: string;
+}
+
+interface PlannedTask extends TranscriptionTask {
+	readonly lines: AudioLines;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 class CancelledError extends Error {}
 
 /**
- * Only audio references with a tag on the same line are processed.
+ * Audio is selected by a tag on its line and/or by the date of the daily note it stands in.
  * References standing side by side are parts of one recording and become one text.
  * Per-audio order is what makes a run safe to interrupt at any point:
  * transcribe → journal the pending deletion → replace embed in note → trash orphaned audio → clear journal.
@@ -39,16 +54,8 @@ export class TranscriptionJob {
 	) {}
 
 	async run(options: JobOptions, signal: AbortSignal): Promise<JobReport> {
-		if (options.folders.length === 0) {
-			throw new Error("no folder configured to search for audio");
-		}
-		const tags = new InlineTags(options.tags);
-		if (tags.isEmpty) {
-			throw new Error("no tag configured: only audio marked with a tag is transcribed");
-		}
-		const lines = new TaggedAudioLines(tags, options.removeTagsAfter);
 		const recoveredDeletions = await this.completePendingDeletions();
-		const tasks = await this.withDurations(await this.collectTasks(options, lines));
+		const tasks = await this.withDurations(await this.plan(options));
 		const failures: TaskFailure[] = [];
 		let done = 0;
 		let cancelled = false;
@@ -61,7 +68,7 @@ export class TranscriptionJob {
 			}
 			this.progress.onTaskStart(index, task);
 			try {
-				await this.process(task, lines, signal, (fraction) => this.progress.onTaskProgress(index, fraction));
+				await this.process(task, signal, (fraction) => this.progress.onTaskProgress(index, fraction));
 				done++;
 				this.progress.onTaskEnd(index, task);
 			} catch (error) {
@@ -81,24 +88,61 @@ export class TranscriptionJob {
 		return report;
 	}
 
-	private async collectTasks(options: JobOptions, lines: TaggedAudioLines): Promise<TranscriptionTask[]> {
-		const tasks: TranscriptionTask[] = [];
-		for (const notePath of this.vault.findNotes(options.folders, options.tags)) {
+	/** Which notes to process and, per note, which of their audio lines. The date rule covers a note whole, so it wins. */
+	private async plan(options: JobOptions): Promise<PlannedTask[]> {
+		if (!options.tagged && options.dailyNotesFrom === undefined) {
+			throw new Error("nothing to transcribe: enable Tagged audio or Daily notes from a date in settings");
+		}
+		const linesByNote = new Map<string, AudioLines>();
+		const tags = options.tagged && this.tagsOf(options.tagged);
+		if (options.tagged && tags) {
+			const lines = new TaggedAudioLines(tags, options.tagged.removeTagsAfter);
+			for (const notePath of this.vault.findNotes(options.tagged.folders, options.tagged.tags)) {
+				linesByNote.set(notePath, lines);
+			}
+		}
+		if (options.dailyNotesFrom !== undefined) {
+			const tagsToRemove = options.tagged?.removeTagsAfter ? tags : undefined;
+			const lines = new AllAudioLines(tagsToRemove);
+			for (const notePath of this.vault.findDailyNotes(this.validDate(options.dailyNotesFrom))) {
+				linesByNote.set(notePath, lines);
+			}
+		}
+		const tasks: PlannedTask[] = [];
+		for (const [notePath, lines] of linesByNote) {
 			const content = (await this.vault.readNote(notePath)) ?? "";
 			const seen = new Set<string>();
 			for (const embeds of lines.groups(content, this.vault.findAudioEmbeds(notePath))) {
 				const key = linkTexts(embeds).join("\n");
 				if (seen.has(key)) continue;
 				seen.add(key);
-				tasks.push({ notePath, embeds });
+				tasks.push({ notePath, embeds, lines });
 			}
 		}
 		return tasks;
 	}
 
-	private async withDurations(tasks: TranscriptionTask[]): Promise<TranscriptionTask[]> {
+	private tagsOf(rule: TagRule): InlineTags {
+		if (rule.folders.length === 0) {
+			throw new Error("no folder configured to search for tagged audio");
+		}
+		const tags = new InlineTags(rule.tags);
+		if (tags.isEmpty) {
+			throw new Error("no tag configured: Tagged audio transcribes only audio marked with a tag");
+		}
+		return tags;
+	}
+
+	private validDate(date: string): string {
+		if (!ISO_DATE.test(date) || Number.isNaN(Date.parse(date))) {
+			throw new Error(`"${date}" is not a date in the YYYY-MM-DD form`);
+		}
+		return date;
+	}
+
+	private async withDurations(tasks: PlannedTask[]): Promise<PlannedTask[]> {
 		const probed = new Set<string>();
-		const result: TranscriptionTask[] = [];
+		const result: PlannedTask[] = [];
 		for (const task of tasks) {
 			let durationSeconds: number | undefined = 0;
 			for (const { audioPath } of task.embeds) {
@@ -115,8 +159,7 @@ export class TranscriptionJob {
 	}
 
 	private async process(
-		task: TranscriptionTask,
-		lines: TaggedAudioLines,
+		task: PlannedTask,
 		signal: AbortSignal,
 		onProgress: (fraction: number) => void,
 	): Promise<void> {
@@ -134,14 +177,14 @@ export class TranscriptionJob {
 		}
 		let replaced = false;
 		await this.vault.editNote(task.notePath, (content) => {
-			const updated = lines.replace(content, references, text);
+			const updated = task.lines.replace(content, references, text);
 			replaced = updated !== content;
 			return updated;
 		});
 		if (!replaced) {
 			for (const { audioPath } of task.embeds) await this.journal.remove(audioPath);
 			throw new Error(
-				`the line with ${references.join(" ")} and the tag was changed during transcription; the audio was kept, run again`,
+				`the line with ${references.join(" ")} was changed during transcription; the audio was kept, run again`,
 			);
 		}
 		for (const { audioPath } of task.embeds) await this.trashIfOrphaned(audioPath);
