@@ -91,7 +91,7 @@ export class TranscriptionJob {
 	/** Which notes to process and, per note, which of their audio lines. The date rule covers a note whole, so it wins. */
 	private async plan(options: JobOptions): Promise<PlannedTask[]> {
 		if (!options.tagged && options.dailyNotesFrom === undefined) {
-			throw new Error("nothing to transcribe: enable Tagged audio or Daily notes from a date in settings");
+			throw new Error("nothing to transcribe: turn on By tag or By daily note date in settings");
 		}
 		const linesByNote = new Map<string, AudioLines>();
 		const tags = options.tagged && this.tagsOf(options.tagged);
@@ -128,7 +128,7 @@ export class TranscriptionJob {
 		}
 		const tags = new InlineTags(rule.tags);
 		if (tags.isEmpty) {
-			throw new Error("no tag configured: Tagged audio transcribes only audio marked with a tag");
+			throw new Error("no tag configured: By tag transcribes only audio marked with a tag");
 		}
 		return tags;
 	}

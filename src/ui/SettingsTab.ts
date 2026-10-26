@@ -15,25 +15,51 @@ export class SettingsTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("What to transcribe").setHeading();
-		this.displayTaggedRule(containerEl);
-		this.displayDailyNotesRule(containerEl);
+		const settings = this.store.settings;
+		new Setting(containerEl)
+			.setName("What to transcribe")
+			.setDesc("Audio is picked by two rules. Turn on one or both; a note matched by either rule is transcribed.")
+			.setHeading();
+		this.displayTagRuleToggle(containerEl);
+		this.displayDateRuleToggle(containerEl);
+		if (settings.transcribeTagged) this.displayTagRuleSettings(containerEl);
+		if (settings.transcribeDailyNotes) this.displayDateRuleSettings(containerEl);
 		new Setting(containerEl).setName("Whisper").setHeading();
 		this.displayEngine(containerEl);
 	}
 
-	private displayTaggedRule(containerEl: HTMLElement): void {
-		const settings = this.store.settings;
+	private displayTagRuleToggle(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName("Tagged audio")
-			.setDesc("Transcribe audio that has one of the tags on its line, in the folder below.")
+			.setName("By tag")
+			.setDesc("Audio with one of the tags on its line, in the chosen folder.")
 			.addToggle((toggle) =>
-				toggle.setValue(settings.transcribeTagged).onChange(async (value) => {
+				toggle.setValue(this.store.settings.transcribeTagged).onChange(async (value) => {
 					await this.store.updateSettings({ transcribeTagged: value });
 					this.display();
 				}),
 			);
-		if (!settings.transcribeTagged) return;
+	}
+
+	private displayDateRuleToggle(containerEl: HTMLElement): void {
+		const config = dailyNotesConfig(this.app);
+		const desc = config
+			? `Every audio in daily notes dated on or after a day, no tag needed. Daily notes: "${config.folder || "/"}" notes named ${config.format}, as set in Obsidian's Daily notes plugin.`
+			: "⚠ Enable the Daily notes core plugin in Obsidian first.";
+		new Setting(containerEl)
+			.setName("By daily note date")
+			.setDesc(desc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.store.settings.transcribeDailyNotes).onChange(async (value) => {
+					const dailyNotesFrom = this.store.settings.dailyNotesFrom || SettingsTab.today();
+					await this.store.updateSettings({ transcribeDailyNotes: value, dailyNotesFrom });
+					this.display();
+				}),
+			);
+	}
+
+	private displayTagRuleSettings(containerEl: HTMLElement): void {
+		const settings = this.store.settings;
+		new Setting(containerEl).setName("By tag: settings").setHeading();
 
 		const folderSetting = new Setting(containerEl).setName("Folder");
 		const describeFolder = (value: string) => folderSetting.setDesc(this.folderDescription(value));
@@ -69,26 +95,11 @@ export class SettingsTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(settings.removeTagsAfter).onChange((value) => this.store.updateSettings({ removeTagsAfter: value })),
 			);
-
 	}
 
-	private displayDailyNotesRule(containerEl: HTMLElement): void {
+	private displayDateRuleSettings(containerEl: HTMLElement): void {
 		const settings = this.store.settings;
-		const config = dailyNotesConfig(this.app);
-		const where = config
-			? `Transcribe every audio in daily notes dated on or after a day, no tag needed. Daily notes are "${config.folder || "/"}" notes named ${config.format}, as set in Obsidian's Daily notes plugin.`
-			: "⚠ Enable the Daily notes core plugin in Obsidian first.";
-		new Setting(containerEl)
-			.setName("Daily notes from a date")
-			.setDesc(where)
-			.addToggle((toggle) =>
-				toggle.setValue(settings.transcribeDailyNotes).onChange(async (value) => {
-					const dailyNotesFrom = settings.dailyNotesFrom || SettingsTab.today();
-					await this.store.updateSettings({ transcribeDailyNotes: value, dailyNotesFrom });
-					this.display();
-				}),
-			);
-		if (!settings.transcribeDailyNotes) return;
+		new Setting(containerEl).setName("By daily note date: settings").setHeading();
 
 		const hint = "Daily notes dated before this day are never touched.";
 		const dateSetting = new Setting(containerEl).setName("From date").setDesc(hint);

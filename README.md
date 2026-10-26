@@ -2,14 +2,14 @@
 
 An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. Two rules pick the audio, each switched on separately in the settings:
 
-- **Tagged audio** — only audio marked with a tag on the same line, inside the chosen folder:
+- **By tag** — only audio marked with a tag on the same line, inside the chosen folder:
 
   ```
   - ![[Recording_1.m4a]] #transcribe   ← transcribed
   - ![[Recording_2.m4a]]               ← left untouched
   ```
 
-- **Daily notes from a date** — every audio in daily notes dated on or after a day, no tag needed. Made for recordings dropped into today's note by quick capture; older daily notes are never touched. The folder and the date format come from Obsidian's Daily notes plugin.
+- **By daily note date** — every audio in daily notes dated on or after a day, no tag needed. Made for recordings dropped into today's note by quick capture; older daily notes are never touched. The folder and the date format come from Obsidian's Daily notes plugin.
 
 Embeds `![[rec.m4a]]`, wiki links `[[rec.m4a]]` and markdown links `[…](rec.m4a)` are supported. The reference is replaced with the transcript, the tag is optionally removed from that line, and the audio is moved to the system trash once nothing references it anymore.
 
@@ -53,7 +53,7 @@ Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): *Add beta plugin* → 
 
 ## Usage
 
-1. In the plugin settings switch on **Tagged audio** (set the folder to scan, subfolders included, and the tags) and/or **Daily notes from a date** (set the day).
+1. In the plugin settings turn on **By tag** (set the folder to scan, subfolders included, and the tags) and/or **By daily note date** (set the day).
 2. For tagged audio, put a tag next to the audio you want transcribed.
 3. Run **Transcribe audio** from the command palette or the ribbon.
 

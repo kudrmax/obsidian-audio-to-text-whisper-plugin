@@ -406,7 +406,7 @@ describe("TranscriptionJob", () => {
 		});
 
 		it("requires at least one rule", async () => {
-			await expect(runWith({})).rejects.toThrow("Tagged audio");
+			await expect(runWith({})).rejects.toThrow("By tag");
 		});
 	});
 });
