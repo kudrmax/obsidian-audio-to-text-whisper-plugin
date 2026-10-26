@@ -1,7 +1,10 @@
 import { App, Plugin, PluginSettingTab, Setting, TFolder, normalizePath } from "obsidian";
+import { dailyNotesConfig } from "../infrastructure/ObsidianDailyNotes";
 import { PluginStore } from "../infrastructure/PluginStore";
 import { WhisperEngine } from "../settings";
 import { FolderSuggest } from "./FolderSuggest";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class SettingsTab extends PluginSettingTab {
 	constructor(app: App, plugin: Plugin, private readonly store: PluginStore) {
@@ -10,8 +13,53 @@ export class SettingsTab extends PluginSettingTab {
 
 	override display(): void {
 		const { containerEl } = this;
-		const settings = this.store.settings;
 		containerEl.empty();
+
+		const settings = this.store.settings;
+		new Setting(containerEl)
+			.setName("What to transcribe")
+			.setDesc("Audio is picked by two rules. Turn on one or both; a note matched by either rule is transcribed.")
+			.setHeading();
+		this.displayTagRuleToggle(containerEl);
+		this.displayDateRuleToggle(containerEl);
+		if (settings.transcribeTagged) this.displayTagRuleSettings(containerEl);
+		if (settings.transcribeDailyNotes) this.displayDateRuleSettings(containerEl);
+		new Setting(containerEl).setName("Whisper").setHeading();
+		this.displayEngine(containerEl);
+	}
+
+	private displayTagRuleToggle(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName("By tag")
+			.setDesc("Audio with one of the tags on its line, in the chosen folder.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.store.settings.transcribeTagged).onChange(async (value) => {
+					await this.store.updateSettings({ transcribeTagged: value });
+					this.display();
+				}),
+			);
+	}
+
+	private displayDateRuleToggle(containerEl: HTMLElement): void {
+		const config = dailyNotesConfig(this.app);
+		const desc = config
+			? `Every audio in daily notes dated on or after a day, no tag needed. Daily notes: "${config.folder || "/"}" notes named ${config.format}, as set in Obsidian's Daily notes plugin.`
+			: "⚠ Enable the Daily notes core plugin in Obsidian first.";
+		new Setting(containerEl)
+			.setName("By daily note date")
+			.setDesc(desc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.store.settings.transcribeDailyNotes).onChange(async (value) => {
+					const dailyNotesFrom = this.store.settings.dailyNotesFrom || SettingsTab.today();
+					await this.store.updateSettings({ transcribeDailyNotes: value, dailyNotesFrom });
+					this.display();
+				}),
+			);
+	}
+
+	private displayTagRuleSettings(containerEl: HTMLElement): void {
+		const settings = this.store.settings;
+		new Setting(containerEl).setName("By tag: settings").setHeading();
 
 		const folderSetting = new Setting(containerEl).setName("Folder");
 		const describeFolder = (value: string) => folderSetting.setDesc(this.folderDescription(value));
@@ -47,7 +95,29 @@ export class SettingsTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(settings.removeTagsAfter).onChange((value) => this.store.updateSettings({ removeTagsAfter: value })),
 			);
+	}
 
+	private displayDateRuleSettings(containerEl: HTMLElement): void {
+		const settings = this.store.settings;
+		new Setting(containerEl).setName("By daily note date: settings").setHeading();
+
+		const hint = "Daily notes dated before this day are never touched.";
+		const dateSetting = new Setting(containerEl).setName("From date").setDesc(hint);
+		dateSetting.addText((text) => {
+			text.inputEl.type = "date";
+			text.setValue(settings.dailyNotesFrom).onChange(async (value) => {
+				if (!SettingsTab.isDate(value)) {
+					dateSetting.setDesc(`⚠ Enter a day as YYYY-MM-DD; the last valid one, ${this.store.settings.dailyNotesFrom}, stays in effect.`);
+					return;
+				}
+				dateSetting.setDesc(hint);
+				await this.store.updateSettings({ dailyNotesFrom: value });
+			});
+		});
+	}
+
+	private displayEngine(containerEl: HTMLElement): void {
+		const settings = this.store.settings;
 		new Setting(containerEl)
 			.setName("Engine")
 			.setDesc("Both run locally and offline.")
@@ -118,6 +188,16 @@ export class SettingsTab extends PluginSettingTab {
 		if (!folder) return `${hint} Required.`;
 		const exists = this.app.vault.getAbstractFileByPath(normalizePath(folder)) instanceof TFolder;
 		return exists ? hint : `⚠ Folder "${folder}" not found.`;
+	}
+
+	private static isDate(value: string): boolean {
+		return ISO_DATE.test(value) && !Number.isNaN(Date.parse(value));
+	}
+
+	private static today(): string {
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 	}
 
 	private static lines(value: string): string[] {

@@ -1,11 +1,15 @@
 # Audio to Text via Whisper
 
-An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. Only audio marked with a tag on the same line is processed:
+An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. Two rules pick the audio, each switched on separately in the settings:
 
-```
-- ![[Recording_1.m4a]] #transcribe   ← transcribed
-- ![[Recording_2.m4a]]               ← left untouched
-```
+- **By tag** — only audio marked with a tag on the same line, inside the chosen folder:
+
+  ```
+  - ![[Recording_1.m4a]] #transcribe   ← transcribed
+  - ![[Recording_2.m4a]]               ← left untouched
+  ```
+
+- **By daily note date** — every audio in daily notes dated on or after a day, no tag needed. Made for recordings dropped into today's note by quick capture; older daily notes are never touched. The folder and the date format come from Obsidian's Daily notes plugin.
 
 Embeds `![[rec.m4a]]`, wiki links `[[rec.m4a]]` and markdown links `[…](rec.m4a)` are supported. The reference is replaced with the transcript, the tag is optionally removed from that line, and the audio is moved to the system trash once nothing references it anymore.
 
@@ -49,9 +53,9 @@ Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): *Add beta plugin* → 
 
 ## Usage
 
-1. Set the folder to scan (subfolders included) and the tags in the plugin settings.
-2. Put a tag next to the audio you want transcribed.
-3. Run **Transcribe tagged audio** from the command palette or the ribbon.
+1. In the plugin settings turn on **By tag** (set the folder to scan, subfolders included, and the tags) and/or **By daily note date** (set the day).
+2. For tagged audio, put a tag next to the audio you want transcribed.
+3. Run **Transcribe audio** from the command palette or the ribbon.
 
 Progress is shown in a notice and the status bar: files done, percentage, current file and estimated time left. The estimate uses audio durations (via `ffprobe`) and the transcription speed remembered from previous runs. Run **Stop transcription** to cancel.
 
@@ -61,7 +65,7 @@ Each audio goes through strictly ordered steps:
 
 1. transcription (no side effects);
 2. a journal entry in the plugin data: audio, note, transcript;
-3. atomic replacement of the reference on the tagged line (`vault.process`). If that line was changed during transcription, the run reports an error and keeps the audio; edits elsewhere in the note are preserved;
+3. atomic replacement of the reference on its line (`vault.process`). If that line was changed during transcription, the run reports an error and keeps the audio; edits elsewhere in the note are preserved;
 4. the audio is moved to the system trash only if nothing references it anymore;
 5. the journal entry is removed.
 
