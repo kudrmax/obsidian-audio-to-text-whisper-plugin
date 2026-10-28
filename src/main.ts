@@ -1,4 +1,4 @@
-import { Notice, Plugin } from "obsidian";
+import { Notice, Plugin, TFile } from "obsidian";
 import { JobOptions, TranscriptionJob } from "./domain/TranscriptionJob";
 import { FfprobeAudioDurations } from "./infrastructure/FfprobeAudioDurations";
 import { ObsidianVaultGateway } from "./infrastructure/ObsidianVaultGateway";
@@ -16,8 +16,19 @@ export default class AudioToTextPlugin extends Plugin {
 		await this.store.load();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new SettingsTab(this.app, this, this.store));
-		this.addRibbonIcon("audio-lines", "Transcribe audio", () => void this.transcribe());
-		this.addCommand({ id: "transcribe", name: "Transcribe audio", callback: () => void this.transcribe() });
+		this.addRibbonIcon("audio-lines", "Transcribe audio", () => void this.transcribe(this.rulesOptions()));
+		this.addCommand({ id: "transcribe", name: "Transcribe audio", callback: () => void this.transcribe(this.rulesOptions()) });
+		this.addRibbonIcon("file-audio", "Transcribe audio in current note", () => this.transcribeCurrentNote());
+		this.addCommand({
+			id: "transcribe-current-note",
+			name: "Transcribe audio in current note",
+			checkCallback: (checking) => {
+				const note = this.currentNote();
+				if (!note) return false;
+				if (!checking) void this.transcribeNote(note);
+				return true;
+			},
+		});
 		this.addCommand({
 			id: "cancel",
 			name: "Stop transcription",
@@ -33,7 +44,29 @@ export default class AudioToTextPlugin extends Plugin {
 		this.running?.abort();
 	}
 
-	private jobOptions(): JobOptions {
+	private currentNote(): TFile | undefined {
+		const file = this.app.workspace.getActiveFile();
+		return file?.extension === "md" ? file : undefined;
+	}
+
+	private transcribeCurrentNote(): void {
+		const note = this.currentNote();
+		if (!note) {
+			new Notice("Audio to Text: open a note to transcribe its audio");
+			return;
+		}
+		void this.transcribeNote(note);
+	}
+
+	private transcribeNote(note: TFile): Promise<void> {
+		const settings = this.store.settings;
+		return this.transcribe({
+			notePath: note.path,
+			tagsToRemove: settings.transcribeTagged && settings.removeTagsAfter ? settings.tags : [],
+		});
+	}
+
+	private rulesOptions(): JobOptions {
 		const settings = this.store.settings;
 		const folder = settings.folder.trim();
 		return {
@@ -44,7 +77,7 @@ export default class AudioToTextPlugin extends Plugin {
 		};
 	}
 
-	private async transcribe(): Promise<void> {
+	private async transcribe(options: JobOptions): Promise<void> {
 		if (this.running) {
 			new Notice("Audio to Text: transcription is already running");
 			return;
@@ -61,7 +94,7 @@ export default class AudioToTextPlugin extends Plugin {
 				this.store,
 				new ProgressNotice(this.statusBar, this.store.speedFor(speedKey), (speed) => void this.store.saveSpeed(speedKey, speed)),
 			);
-			await job.run(this.jobOptions(), this.running.signal);
+			await job.run(options, this.running.signal);
 		} catch (error) {
 			new Notice(`Audio to Text: ${error instanceof Error ? error.message : String(error)}`, 0);
 		} finally {

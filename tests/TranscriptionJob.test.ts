@@ -409,4 +409,69 @@ describe("TranscriptionJob", () => {
 			await expect(runWith({})).rejects.toThrow("By tag");
 		});
 	});
+
+	describe("single note", () => {
+		const note = (notePath: string, tagsToRemove: string[] = []) => runWith({ notePath, tagsToRemove });
+
+		it("transcribes every audio of the note and touches no other note or audio", async () => {
+			vault
+				.addAudio("att/a.m4a")
+				.addAudio("att/b.m4a")
+				.addAudio("att/tagged.m4a")
+				.addAudio("att/daily.m4a")
+				.addNote("Elsewhere/n.md", "- ![[a.m4a]]\n- idea\n- ![[b.m4a]] #transcribe")
+				.addNote("Inbox/other.md", "![[tagged.m4a]] #transcribe")
+				.addNote("Journal/Daily notes/2026-10-26.md", "![[daily.m4a]]");
+
+			const report = await note("Elsewhere/n.md");
+
+			expect(report).toMatchObject({ total: 2, done: 2, failures: [] });
+			expect(vault.content("Elsewhere/n.md")).toBe("- text of a\n- idea\n- text of b #transcribe");
+			expect(transcriber.calls).toEqual(["/vault/att/a.m4a", "/vault/att/b.m4a"]);
+			expect(vault.trashed).toEqual(["att/a.m4a", "att/b.m4a"]);
+			expect(vault.content("Inbox/other.md")).toBe("![[tagged.m4a]] #transcribe");
+			expect(vault.content("Journal/Daily notes/2026-10-26.md")).toBe("![[daily.m4a]]");
+		});
+
+		it("removes the given tags from the transcribed lines only", async () => {
+			vault.addAudio("att/a.m4a").addNote("n.md", "- ![[a.m4a]] #transcribe\n- idea #transcribe");
+
+			await note("n.md", ["transcribe"]);
+
+			expect(vault.content("n.md")).toBe("- text of a\n- idea #transcribe");
+		});
+
+		it("keeps audio that another note still references", async () => {
+			vault.addAudio("att/a.m4a").addNote("n.md", "![[a.m4a]]").addNote("other.md", "![[a.m4a]]");
+
+			await note("n.md");
+
+			expect(vault.content("n.md")).toBe("text of a");
+			expect(vault.content("other.md")).toBe("![[a.m4a]]");
+			expect(vault.audio.has("att/a.m4a")).toBe(true);
+		});
+
+		it("finishes pending deletions of this note only", async () => {
+			vault
+				.addAudio("att/mine.m4a")
+				.addAudio("att/theirs.m4a")
+				.addNote("n.md", "text of mine")
+				.addNote("other.md", "text of theirs");
+			await journal.add({ audioPath: "att/mine.m4a", notePath: "n.md", transcript: "text of mine" });
+			await journal.add({ audioPath: "att/theirs.m4a", notePath: "other.md", transcript: "text of theirs" });
+
+			const report = await note("n.md");
+
+			expect(report.recoveredDeletions).toBe(1);
+			expect(vault.trashed).toEqual(["att/mine.m4a"]);
+			expect(journal.list().map((entry) => entry.audioPath)).toEqual(["att/theirs.m4a"]);
+		});
+
+		it("fails for a note that does not exist", async () => {
+			vault.addAudio("att/a.m4a").addNote("other.md", "![[a.m4a]]");
+
+			await expect(note("gone.md")).rejects.toThrow("note not found");
+			expect(transcriber.calls).toEqual([]);
+		});
+	});
 });
