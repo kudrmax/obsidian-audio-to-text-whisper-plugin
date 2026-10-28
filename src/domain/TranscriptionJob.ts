@@ -21,11 +21,20 @@ export interface TagRule {
 }
 
 /** At least one rule is required; a note matched by both is processed once, with every audio in it. */
-export interface JobOptions {
+export interface RuleOptions {
 	readonly tagged?: TagRule;
 	/** Daily notes dated on or after this day (YYYY-MM-DD) are processed whole, no tag needed. */
 	readonly dailyNotesFrom?: string;
 }
+
+/** Only this note is processed, every audio in it, no tag needed; no other note is read for selection or edited. */
+export interface SingleNoteOptions {
+	readonly notePath: string;
+	/** Tags removed from the transcribed lines. */
+	readonly tagsToRemove: readonly string[];
+}
+
+export type JobOptions = RuleOptions | SingleNoteOptions;
 
 interface PlannedTask extends TranscriptionTask {
 	readonly lines: AudioLines;
@@ -54,7 +63,8 @@ export class TranscriptionJob {
 	) {}
 
 	async run(options: JobOptions, signal: AbortSignal): Promise<JobReport> {
-		const recoveredDeletions = await this.completePendingDeletions();
+		const onlyNote = "notePath" in options ? options.notePath : undefined;
+		const recoveredDeletions = await this.completePendingDeletions(onlyNote);
 		const tasks = await this.withDurations(await this.plan(options));
 		const failures: TaskFailure[] = [];
 		let done = 0;
@@ -88,8 +98,32 @@ export class TranscriptionJob {
 		return report;
 	}
 
-	/** Which notes to process and, per note, which of their audio lines. The date rule covers a note whole, so it wins. */
 	private async plan(options: JobOptions): Promise<PlannedTask[]> {
+		const linesByNote = "notePath" in options ? await this.singleNote(options) : this.matchedNotes(options);
+		const tasks: PlannedTask[] = [];
+		for (const [notePath, lines] of linesByNote) {
+			const content = (await this.vault.readNote(notePath)) ?? "";
+			const seen = new Set<string>();
+			for (const embeds of lines.groups(content, this.vault.findAudioEmbeds(notePath))) {
+				const key = linkTexts(embeds).join("\n");
+				if (seen.has(key)) continue;
+				seen.add(key);
+				tasks.push({ notePath, embeds, lines });
+			}
+		}
+		return tasks;
+	}
+
+	private async singleNote(options: SingleNoteOptions): Promise<Map<string, AudioLines>> {
+		if ((await this.vault.readNote(options.notePath)) === undefined) {
+			throw new Error(`note not found: ${options.notePath}`);
+		}
+		const tags = new InlineTags(options.tagsToRemove);
+		return new Map([[options.notePath, new AllAudioLines(tags.isEmpty ? undefined : tags)]]);
+	}
+
+	/** Which notes the rules select and, per note, which of their audio lines. The date rule covers a note whole, so it wins. */
+	private matchedNotes(options: RuleOptions): Map<string, AudioLines> {
 		if (!options.tagged && options.dailyNotesFrom === undefined) {
 			throw new Error("nothing to transcribe: turn on By tag or By daily note date in settings");
 		}
@@ -108,18 +142,7 @@ export class TranscriptionJob {
 				linesByNote.set(notePath, lines);
 			}
 		}
-		const tasks: PlannedTask[] = [];
-		for (const [notePath, lines] of linesByNote) {
-			const content = (await this.vault.readNote(notePath)) ?? "";
-			const seen = new Set<string>();
-			for (const embeds of lines.groups(content, this.vault.findAudioEmbeds(notePath))) {
-				const key = linkTexts(embeds).join("\n");
-				if (seen.has(key)) continue;
-				seen.add(key);
-				tasks.push({ notePath, embeds, lines });
-			}
-		}
-		return tasks;
+		return linesByNote;
 	}
 
 	private tagsOf(rule: TagRule): InlineTags {
@@ -216,9 +239,11 @@ export class TranscriptionJob {
 		return text;
 	}
 
-	private async completePendingDeletions(): Promise<number> {
+	/** Finishes deletions an interrupted run left behind; with `onlyNote`, only those that run made for that note. */
+	private async completePendingDeletions(onlyNote?: string): Promise<number> {
 		let trashed = 0;
-		for (const entry of this.journal.list()) {
+		const entries = this.journal.list().filter((entry) => onlyNote === undefined || entry.notePath === onlyNote);
+		for (const entry of entries) {
 			const textSaved = (await this.vault.readNote(entry.notePath))?.includes(entry.transcript) ?? false;
 			if (!textSaved) {
 				await this.journal.remove(entry.audioPath);

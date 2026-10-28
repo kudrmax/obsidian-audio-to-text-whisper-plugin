@@ -57,6 +57,8 @@ Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): *Add beta plugin* → 
 2. For tagged audio, put a tag next to the audio you want transcribed.
 3. Run **Transcribe audio** from the command palette or the ribbon.
 
+To transcribe only the open note, run **Transcribe audio in current note** (a separate ribbon button with a file icon). It transcribes every audio in that note, tagged or not, and never reads or edits any other note. Audio still referenced from another note is kept.
+
 Progress is shown in a notice and the status bar: files done, percentage, current file and estimated time left. The estimate uses audio durations (via `ffprobe`) and the transcription speed remembered from previous runs. Run **Stop transcription** to cancel.
 
 ## Data safety
