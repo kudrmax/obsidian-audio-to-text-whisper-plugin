@@ -1,4 +1,4 @@
-import { App, Setting, TFolder, normalizePath } from "obsidian";
+import { App, Setting, setIcon } from "obsidian";
 import { RuleScope, TranscriptionRule, ValidRule } from "../domain/TranscriptionRule";
 import { dailyNotesConfig } from "../infrastructure/ObsidianDailyNotes";
 import { PluginStore } from "../infrastructure/PluginStore";
@@ -11,6 +11,8 @@ type RuleUpdate = (patch: (rule: TranscriptionRule) => Partial<TranscriptionRule
 
 /** The list of rules: a card per rule, OR between cards. */
 export class RulesSection {
+	private saving = false;
+
 	constructor(
 		private readonly app: App,
 		private readonly store: PluginStore,
@@ -54,10 +56,15 @@ export class RulesSection {
 					.onClick(() => this.saveRules(this.rules().filter((_, i) => i !== index), true)),
 			);
 		header.settingEl.addClass("att-rule-header");
+		if (!RulesSection.isEditable(rule)) {
+			RulesSection.warn(header.descEl, "This rule is damaged. Delete it and add it again.");
+			return;
+		}
 		const describe = (current: TranscriptionRule) => {
+			header.descEl.empty();
 			const problem = RulesSection.problemOf(current, index);
-			header.setDesc(problem ? `⚠ ${problem}` : this.summary(current));
-			header.descEl.toggleClass("mod-warning", problem !== undefined);
+			if (problem) RulesSection.warn(header.descEl, problem);
+			else this.renderSummary(header.descEl, current);
 		};
 		describe(rule);
 
@@ -100,8 +107,8 @@ export class RulesSection {
 			setting.settingEl.addClass("att-rule-list-item");
 			const describe = (value: string) => {
 				const missing = this.missingFolder(value);
-				setting.setDesc(missing ? `⚠ Folder "${missing}" not found.` : folderIndex === 0 ? hint : "");
-				setting.descEl.toggleClass("mod-warning", missing !== undefined);
+				setting.setDesc(folderIndex === 0 && !missing ? hint : "");
+				if (missing) RulesSection.warn(setting.descEl, `Folder "${missing}" not found.`);
 			};
 			describe(folder);
 			setting.addText((text) => {
@@ -130,14 +137,9 @@ export class RulesSection {
 
 	private displayDates(cardEl: HTMLElement, rule: TranscriptionRule, update: RuleUpdate): void {
 		const config = dailyNotesConfig(this.app);
-		const setting = new Setting(cardEl)
-			.setName("Dates")
-			.setDesc(
-				config
-					? `Notes named ${config.format} in "${config.folder || "/"}", as set in Obsidian's Daily notes plugin.`
-					: "⚠ Enable the Daily notes core plugin in Obsidian first.",
-			);
-		setting.descEl.toggleClass("mod-warning", !config);
+		const setting = new Setting(cardEl).setName("Dates");
+		if (config) setting.setDesc(`Notes named ${config.format} in "${config.folder || "/"}", as set in Obsidian's Daily notes plugin.`);
+		else RulesSection.warn(setting.descEl, "Enable the Daily notes core plugin in Obsidian first.");
 		setting.addDropdown((dropdown) =>
 			dropdown
 				.addOption("any", "Any date")
@@ -172,31 +174,55 @@ export class RulesSection {
 			.addToggle((toggle) => toggle.setValue(rule.removeTagsAfter).onChange((value) => update(() => ({ removeTagsAfter: value }))));
 	}
 
-	private summary(rule: TranscriptionRule): string {
-		const what = rule.onlyTagged ? `Audio tagged ${RulesSection.joinOr(rule.tags.map((t) => `#${t}`))}` : "Every audio";
-		return `${what} ${this.where(rule)}.`;
-	}
+	/** Every fact of the rule as its own chip; broad rules get a warning under them. */
+	private renderSummary(el: HTMLElement, rule: TranscriptionRule): void {
+		const chips = el.createDiv({ cls: "att-chips" });
+		const chip = (icon: string, text: string) => {
+			const chipEl = chips.createSpan({ cls: "att-chip" });
+			setIcon(chipEl.createSpan({ cls: "att-chip-icon" }), icon);
+			chipEl.createSpan({ text });
+		};
+		const wholeVault = rule.scope === "folders" && rule.folders.some((f) => f.trim() !== "" && f.replace(/[\s/]/g, "") === "");
+		if (rule.scope === "daily") chip("calendar", rule.fromDate ? `Daily notes from ${rule.fromDate}` : "Every daily note");
+		else if (wholeVault) chip("vault", "Whole vault");
+		else for (const folder of rule.folders.map((f) => f.trim()).filter(Boolean)) chip("folder", folder);
+		if (rule.onlyTagged) for (const tag of rule.tags) chip("tag", tag);
+		else chip("audio-lines", "Every audio");
 
-	private where(rule: TranscriptionRule): string {
-		if (rule.scope === "daily") return rule.fromDate ? `in daily notes from ${rule.fromDate} on` : "in every daily note";
-		const folders = rule.folders.map((f) => f.trim()).filter(Boolean);
-		if (folders.some((f) => f.replace(/\//g, "") === "")) return "anywhere in the vault";
-		return `in ${RulesSection.joinOr(folders.map((f) => `"${f}"`))}`;
+		if (!rule.onlyTagged && (wholeVault || (rule.scope === "daily" && !rule.fromDate))) {
+			RulesSection.warn(el, wholeVault ? "Every audio in the vault will be replaced with text and trashed." : "Every audio in every daily note will be replaced with text and trashed.");
+		}
 	}
 
 	private missingFolder(value: string): string | undefined {
-		const folder = value.trim();
-		if (!folder || folder.replace(/\//g, "") === "") return undefined;
-		return this.app.vault.getAbstractFileByPath(normalizePath(folder)) instanceof TFolder ? undefined : folder;
+		const folder = value.normalize("NFC").trim().replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+		if (!folder) return undefined;
+		const exists = this.app.vault.getAllFolders().some((f) => f.path.normalize("NFC") === folder);
+		return exists ? undefined : value.trim();
 	}
 
 	private rules(): TranscriptionRule[] {
 		return this.store.settings.rules;
 	}
 
+	/** Structural changes ignore clicks until the redraw, so a double click never hits the next rule by position. */
 	private async saveRules(rules: TranscriptionRule[], redraw: boolean): Promise<void> {
+		if (this.saving) return;
+		if (redraw) this.saving = true;
 		await this.store.updateSettings({ rules });
 		if (redraw) this.redraw();
+	}
+
+	private static isEditable(rule: unknown): rule is TranscriptionRule {
+		if (typeof rule !== "object" || rule === null) return false;
+		const r = rule as Record<string, unknown>;
+		return (r.scope === "folders" || r.scope === "daily") && Array.isArray(r.folders) && Array.isArray(r.tags);
+	}
+
+	private static warn(el: HTMLElement, text: string): void {
+		const line = el.createDiv({ cls: "att-warning" });
+		setIcon(line.createSpan({ cls: "att-warning-icon" }), "alert-triangle");
+		line.createSpan({ text });
 	}
 
 	private static problemOf(rule: TranscriptionRule, index: number): string | undefined {
@@ -207,11 +233,6 @@ export class RulesSection {
 			const message = error instanceof Error ? error.message : String(error);
 			return message.replace(/^rule \d+: /, "").replace(/^./, (c) => c.toUpperCase()) + ".";
 		}
-	}
-
-	private static joinOr(items: string[]): string {
-		if (items.length <= 1) return items.join("");
-		return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
 	}
 
 	private static today(): string {
