@@ -36,7 +36,8 @@ Unchanged: every audio in the open note, works with zero rules. Tags removed fro
 - Dates are checked strictly: `2026-02-30`, `2026-2-1`, ` 2026-11-01 ` are refused. Empty means any date.
 - A tag must consist of letters, digits, `_`, `-`, `/`; otherwise the rule is refused. Nested tags (`#transcribe/sub`) and longer tags do not match `transcribe` (safer than Obsidian's search, which counts nested tags as children).
 - A stored rule of the wrong shape (unknown scope, missing or non-boolean `onlyTagged`, non-array folders or tags, non-string items) refuses the run; it is never filled in. A stored `rules` value that is not an array loads as no rules.
-- Frontmatter and fenced code blocks are never selected or edited. Tags inside inline code, `%% %%` and `<!-- -->` do not select a line.
+- Frontmatter, fenced code (also inside quotes; a closing fence carries no info string), inline code and comments (`%% %%`, `<!-- -->`, multi-line, unclosed to the end of the note) are hidden: references there are never transcribed or rewritten, a #word there or inside a link text is not a tag, and tag removal never touches them or the inserted transcript. Indented code blocks are not detected (they collide with nested lists).
+- Tags are compared in NFC; a tag followed by a combining mark is a longer word. Digit-only tags are refused, as Obsidian does not treat them as tags.
 - Daily notes: the path below the daily folder is parsed with the date format, so formats with slashes work and notes in subfolders do not count for flat formats.
 - A task replaces exactly its own run of references: a lone `![[a]]` task never rewrites `a` inside `![[a]] ![[b]]` (fixes a 0.5.0 bug). A tag is removed from a line only once its last recording is transcribed (fixes a 0.5.0 bug with two recordings on one tagged line).
 - The same audio twice side by side becomes one text. A tag between parts splits them into two recordings.

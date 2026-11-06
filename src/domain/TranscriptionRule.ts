@@ -51,7 +51,7 @@ export class ValidRule {
 			folders = FolderScope.of(rule.folders);
 			if (!folders) return fail("add a folder, or / for the whole vault");
 		} else {
-			if (rule.fromDate !== "" && !isRealDate(rule.fromDate)) fail(`"${rule.fromDate}" is not a date in the YYYY-MM-DD form`);
+			if (rule.fromDate !== "" && !isRealDate(rule.fromDate)) return fail(`"${rule.fromDate}" is not a date in the YYYY-MM-DD form`);
 			fromDate = rule.fromDate;
 		}
 
@@ -59,7 +59,7 @@ export class ValidRule {
 		if (rule.onlyTagged) {
 			const names = rule.tags.map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
 			if (names.length === 0) return fail("add a tag or choose Every audio");
-			const invalid = names.find((name) => !TAG_NAME.test(name));
+			const invalid = names.find((name) => !TAG_NAME.test(name) || /^\d+$/.test(name));
 			if (invalid !== undefined) return fail(`"${invalid}" is not a tag`);
 			tags = new InlineTags(names);
 		}

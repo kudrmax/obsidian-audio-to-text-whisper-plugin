@@ -86,4 +86,48 @@ describe("AudioLines", () => {
 	it("ignores tags in inline code and comments", () => {
 		expect(tagged.groups("![[a.m4a]] `#transcribe` %%#transcribe%% <!-- #transcribe -->")).toEqual([]);
 	});
+
+	it("never removes a tag inside inline code, a comment or the transcript", () => {
+		expect(tagged.replace("![[a.m4a]] #transcribe `x #transcribe`", ["![[a.m4a]]"], "T")).toBe("T `x #transcribe`");
+		expect(tagged.replace("![[a.m4a]] #transcribe %% keep #transcribe %%", ["![[a.m4a]]"], "T")).toBe("T %% keep #transcribe %%");
+		expect(tagged.replace("![[a.m4a]] #transcribe", ["![[a.m4a]]"], "say #transcribe")).toBe("say #transcribe");
+	});
+
+	it("never rewrites a reference inside inline code or a comment", () => {
+		expect(every.replace("![[a.m4a]]\nsyntax: `![[a.m4a]]`", ["![[a.m4a]]"], "T")).toBe("T\nsyntax: `![[a.m4a]]`");
+		expect(tagged.replace("![[a.m4a]] #transcribe and `![[a.m4a]]`", ["![[a.m4a]]"], "T")).toBe("T and `![[a.m4a]]`");
+		expect(every.replace("![[a.m4a]] %% ![[a.m4a]] %% <!-- ![[a.m4a]] -->", ["![[a.m4a]]"], "T")).toBe(
+			"T %% ![[a.m4a]] %% <!-- ![[a.m4a]] -->",
+		);
+	});
+
+	it("hides multi-line comments, unclosed ones to the end of the note", () => {
+		expect(tagged.groups("%%\n![[a.m4a]] #transcribe\n%%")).toEqual([]);
+		expect(tagged.groups("<!--\n![[a.m4a]] #transcribe\n-->")).toEqual([]);
+		expect(every.groups("![[b.m4a]]\n%% unclosed\n![[a.m4a]]")).toEqual([[b]]);
+	});
+
+	it("does not close a fence with a line carrying an info string, and sees fences in quotes", () => {
+		expect(every.groups("```\n```js\n![[a.m4a]]\n```\n![[b.m4a]]")).toEqual([[b]]);
+		expect(every.groups("> ```\n> ![[a.m4a]]\n> ```\n![[b.m4a]]")).toEqual([[b]]);
+	});
+
+	it("removes a tag that directly follows a code span", () => {
+		expect(tagged.replace("![[a.m4a]] `x`#transcribe", ["![[a.m4a]]"], "T")).toBe("T `x`");
+	});
+
+	it("does not treat a #word inside a link as a tag", () => {
+		expect(tagged.groups("![[a.m4a]] [[Some note#transcribe]]")).toEqual([]);
+		expect(tagged.groups("![[a.m4a]] [see #transcribe](http://x)")).toEqual([]);
+	});
+
+	it("keeps emoji and text around the run intact", () => {
+		expect(tagged.replace("🎙️ ![[a.m4a]] #transcribe 👍", ["![[a.m4a]]"], "T")).toBe("🎙️ T 👍");
+	});
+});
+
+describe("InlineTags with combining marks", () => {
+	it("does not match a tag that continues with a combining mark", () => {
+		expect(new InlineTags(["cafe"]).matches("#cafe\u0301")).toBe(false);
+	});
 });

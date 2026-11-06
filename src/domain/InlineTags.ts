@@ -6,7 +6,7 @@ export class InlineTags {
 	readonly names: readonly string[];
 
 	constructor(tags: readonly string[]) {
-		this.names = tags.map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
+		this.names = tags.map((t) => t.normalize("NFC").trim().replace(/^#/, "")).filter(Boolean);
 	}
 
 	get isEmpty(): boolean {
@@ -25,6 +25,6 @@ export class InlineTags {
 	}
 
 	private pattern(name: string): RegExp {
-		return new RegExp(`(^|[ \\t]+)#${escapeRegExp(name)}(?![\\p{L}\\p{N}_/-])([ \\t]*)`, "gimu");
+		return new RegExp(`(^|[ \\t]+)#${escapeRegExp(name)}(?![\\p{L}\\p{M}\\p{N}_/-])([ \\t]*)`, "gimu");
 	}
 }

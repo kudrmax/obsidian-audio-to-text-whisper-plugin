@@ -119,6 +119,7 @@ describe("Transcription rules", () => {
 		it("V11 a tag that cannot be a tag", async () => {
 			await expectRefused([folders(["/"], ["my tag"])], "tag");
 			await expectRefused([folders(["/"], ["a,b"])], "tag");
+			await expectRefused([folders(["/"], ["2026"])], "tag");
 		});
 
 		it("V12 validation happens before pending deletions are finished", async () => {
