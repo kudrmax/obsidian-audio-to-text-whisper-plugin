@@ -40,11 +40,6 @@
 	border-top: 1px dashed var(--background-modifier-border);
 }
 
-.att-rules-empty {
-	color: var(--text-muted);
-	padding: var(--size-4-2) 0;
-}
-
 .att-chips {
 	display: flex;
 	flex-wrap: wrap;

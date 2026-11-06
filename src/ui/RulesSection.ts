@@ -26,23 +26,18 @@ export class RulesSection {
 			.setHeading();
 
 		const rules = this.rules();
-		if (rules.length === 0) {
-			containerEl.createDiv({
-				cls: "att-rules-empty",
-				text: "No rules yet, so Transcribe audio does nothing. Transcribe audio in current note still works.",
-			});
-		}
 		rules.forEach((_, index) => {
 			if (index > 0) containerEl.createDiv({ cls: "att-rule-or", text: "or" });
 			this.displayRule(containerEl.createDiv({ cls: "att-rule" }), index);
 		});
 
-		new Setting(containerEl).addButton((button) =>
+		const addRule = new Setting(containerEl).addButton((button) =>
 			button
 				.setButtonText("Add rule")
 				.setCta()
 				.onClick(() => this.saveRules([...this.rules(), structuredClone(NEW_RULE)], true)),
 		);
+		if (rules.length === 0) addRule.setDesc("No rules yet, so Transcribe audio does nothing. Transcribe audio in current note still works.");
 	}
 
 	private displayRule(cardEl: HTMLElement, index: number): void {
