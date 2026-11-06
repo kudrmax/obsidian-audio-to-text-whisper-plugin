@@ -1,15 +1,16 @@
 # Audio to Text via Whisper
 
-An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. Two rules pick the audio, each switched on separately in the settings:
+An Obsidian plugin that transcribes audio in your notes with a **local, offline Whisper** and replaces the audio with text. You choose the audio with **rules** in the settings. A rule is a scope and an optional tag:
 
-- **By tag** — only audio marked with a tag on the same line, inside the chosen folder:
+- **Where**: folders (subfolders included, `/` is the whole vault) or daily notes, optionally only those dated on or after a day. The daily notes folder and date format come from Obsidian's Daily notes plugin.
+- **Which audio**: every audio, or only audio with one of the rule's tags on the same line:
 
   ```
   - ![[Recording_1.m4a]] #transcribe   ← transcribed
   - ![[Recording_2.m4a]]               ← left untouched
   ```
 
-- **By daily note date** — every audio in daily notes dated on or after a day, no tag needed. Made for recordings dropped into today's note by quick capture; older daily notes are never touched. The folder and the date format come from Obsidian's Daily notes plugin.
+Audio is transcribed when it matches **any** rule. A tag in frontmatter, inline code, a comment or a code block never selects audio, and frontmatter and code blocks are never edited. If a rule is incomplete (no folder, no tag, an invalid date), the run is refused before anything is touched.
 
 Embeds `![[rec.m4a]]`, wiki links `[[rec.m4a]]` and markdown links `[…](rec.m4a)` are supported. The reference is replaced with the transcript, the tag is optionally removed from that line, and the audio is moved to the system trash once nothing references it anymore.
 
@@ -53,11 +54,11 @@ Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): *Add beta plugin* → 
 
 ## Usage
 
-1. In the plugin settings turn on **By tag** (set the folder to scan, subfolders included, and the tags) and/or **By daily note date** (set the day).
-2. For tagged audio, put a tag next to the audio you want transcribed.
+1. In the plugin settings add one or more rules. A fresh install, and an update from 0.5.0 or earlier, starts with no rules: **Transcribe audio** does nothing until you add one.
+2. For rules with a tag, put the tag on the line of the audio you want transcribed.
 3. Run **Transcribe audio** from the command palette or the ribbon.
 
-To transcribe only the open note, run **Transcribe audio in current note** (a separate ribbon button with a file icon). It transcribes every audio in that note, tagged or not, and never reads or edits any other note. Audio still referenced from another note is kept.
+To transcribe only the open note, run **Transcribe audio in current note** (a separate ribbon button with a file icon). It transcribes every audio in that note, tagged or not, needs no rules and never reads or edits any other note. It removes from the transcribed lines the tags of rules that cover the note and have tag removal on. Audio still referenced from another note is kept.
 
 Progress is shown in a notice and the status bar: files done, percentage, current file and estimated time left. The estimate uses audio durations (via `ffprobe`) and the transcription speed remembered from previous runs. Run **Stop transcription** to cancel.
 

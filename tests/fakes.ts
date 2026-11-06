@@ -1,7 +1,8 @@
-import { InlineTags } from "../src/domain/InlineTags";
+import { DailyNotes } from "../src/infrastructure/DailyNotes";
 import {
 	AudioDurations,
 	AudioEmbed,
+	DatedNote,
 	DeletionJournal,
 	JobReport,
 	PendingDeletion,
@@ -19,6 +20,7 @@ export class FakeVault implements VaultGateway {
 	readonly notes = new Map<string, FakeNote>();
 	readonly audio = new Set<string>();
 	readonly trashed: string[] = [];
+	dailyNotesEnabled = true;
 	failOnEdit = false;
 	editDuringTranscription?: (content: string) => string;
 	failOnTrash = false;
@@ -37,18 +39,14 @@ export class FakeVault implements VaultGateway {
 		return this.notes.get(path)!.content;
 	}
 
-	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
-		return [...this.notes.entries()]
-			.filter(([path]) => folders.some((f) => path.startsWith(`${f}/`)))
-			.filter(([, note]) => new InlineTags(tags).matches(note.content))
-			.map(([path]) => path);
+	listNotes(): string[] {
+		return [...this.notes.keys()];
 	}
 
-	findDailyNotes(fromDate: string): string[] {
-		const folder = "Journal/Daily notes/";
-		return [...this.notes.keys()]
-			.filter((path) => path.startsWith(folder))
-			.filter((path) => path.slice(folder.length, -3) >= fromDate);
+	dailyNotes(): DatedNote[] {
+		if (!this.dailyNotesEnabled) throw new Error("daily notes are not set up: enable the Daily notes core plugin in Obsidian");
+		const iso = (name: string) => (/^\d{4}-\d{2}-\d{2}$/.test(name) ? name : undefined);
+		return new DailyNotes("Journal/Daily notes", iso).dated(this.listNotes());
 	}
 
 	findAudioEmbeds(notePath: string): AudioEmbed[] {

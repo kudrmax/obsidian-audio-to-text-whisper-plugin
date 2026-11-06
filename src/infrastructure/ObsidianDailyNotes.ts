@@ -29,8 +29,8 @@ export function dailyNotesConfig(app: App): DailyNotesConfig | undefined {
 }
 
 export function dailyNotesOf(config: DailyNotesConfig): DailyNotes {
-	return new DailyNotes(config.folder, (basename) => {
-		const parsed = parseMoment(basename, config.format, true);
+	return new DailyNotes(config.folder, (relativePath) => {
+		const parsed = parseMoment(relativePath, config.format, true);
 		return parsed.isValid() ? parsed.format("YYYY-MM-DD") : undefined;
 	});
 }

@@ -11,10 +11,16 @@ export interface TranscriptionTask {
 	readonly durationSeconds?: number;
 }
 
+export interface DatedNote {
+	readonly path: string;
+	/** YYYY-MM-DD */
+	readonly day: string;
+}
+
 export interface VaultGateway {
-	findNotes(folders: readonly string[], tags: readonly string[]): string[];
-	/** Daily notes whose name is a date on or after `fromDate` (YYYY-MM-DD); fails when daily notes are not set up. */
-	findDailyNotes(fromDate: string): string[];
+	listNotes(): string[];
+	/** Notes of the Daily notes core plugin with their day; fails when daily notes are not set up. */
+	dailyNotes(): DatedNote[];
 	findAudioEmbeds(notePath: string): AudioEmbed[];
 	exists(path: string): boolean;
 	absolutePath(path: string): string;

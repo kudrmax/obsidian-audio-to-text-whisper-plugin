@@ -3,7 +3,7 @@ function escapeRegExp(text: string): string {
 }
 
 export class InlineTags {
-	private readonly names: readonly string[];
+	readonly names: readonly string[];
 
 	constructor(tags: readonly string[]) {
 		this.names = tags.map((t) => t.trim().replace(/^#/, "")).filter(Boolean);

@@ -1,5 +1,5 @@
-import { App, FileSystemAdapter, TFile, getAllTags, getLinkpath, normalizePath } from "obsidian";
-import { AudioEmbed, VaultGateway } from "../domain/ports";
+import { App, FileSystemAdapter, TFile, getLinkpath } from "obsidian";
+import { AudioEmbed, DatedNote, VaultGateway } from "../domain/ports";
 import { dailyNotesConfig, dailyNotesOf } from "./ObsidianDailyNotes";
 
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "webm", "flac", "aac", "3gp", "mp4"]);
@@ -7,23 +7,16 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "m4a", "ogg", "oga", "opus", "we
 export class ObsidianVaultGateway implements VaultGateway {
 	constructor(private readonly app: App) {}
 
-	findNotes(folders: readonly string[], tags: readonly string[]): string[] {
-		const prefixes = folders.map((f) => normalizePath(f));
-		const wanted = new Set(tags.map((t) => `#${t.replace(/^#/, "").toLowerCase()}`));
-		return this.app.vault
-			.getMarkdownFiles()
-			.filter((file) => prefixes.some((p) => p === "/" || file.path.startsWith(`${p}/`)))
-			.filter((file) => this.tagsOf(file).some((t) => wanted.has(t)))
-			.map((file) => file.path);
+	listNotes(): string[] {
+		return this.app.vault.getMarkdownFiles().map((file) => file.path);
 	}
 
-	findDailyNotes(fromDate: string): string[] {
+	dailyNotes(): DatedNote[] {
 		const config = dailyNotesConfig(this.app);
 		if (!config) {
 			throw new Error("daily notes are not set up: enable the Daily notes core plugin in Obsidian");
 		}
-		const paths = this.app.vault.getMarkdownFiles().map((file) => file.path);
-		return dailyNotesOf(config).datedFrom(fromDate, paths);
+		return dailyNotesOf(config).dated(this.listNotes());
 	}
 
 	findAudioEmbeds(notePath: string): AudioEmbed[] {
@@ -75,11 +68,6 @@ export class ObsidianVaultGateway implements VaultGateway {
 
 	async trash(path: string): Promise<void> {
 		await this.app.vault.trash(this.file(path), true);
-	}
-
-	private tagsOf(file: TFile): string[] {
-		const cache = this.app.metadataCache.getFileCache(file);
-		return (cache ? getAllTags(cache) ?? [] : []).map((t) => t.toLowerCase());
 	}
 
 	private sourcesLinkingTo(path: string): string[] {
