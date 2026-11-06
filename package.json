@@ -1,6 +1,6 @@
 {
   "name": "obsidian-audio-to-text-whisper-plugin",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Transcribes audio in Obsidian notes, picked by folder, daily note date and tag rules, with a local, offline Whisper and replaces it with text",
   "main": "main.js",
   "private": true,
