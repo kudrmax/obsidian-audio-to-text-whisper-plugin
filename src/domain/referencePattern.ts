@@ -10,7 +10,3 @@ export function referencePattern(references: readonly string[]): RegExp {
 	const guard = references[0].startsWith("!") ? "" : "(?<!!)";
 	return new RegExp(guard + references.map(escapeRegExp).join("\\s*"), "g");
 }
-
-export function replaceReference(content: string, references: readonly string[], replacement: string): string {
-	return content.replace(referencePattern(references), () => replacement);
-}

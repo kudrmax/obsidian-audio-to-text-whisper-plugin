@@ -59,22 +59,11 @@ export default class AudioToTextPlugin extends Plugin {
 	}
 
 	private transcribeNote(note: TFile): Promise<void> {
-		const settings = this.store.settings;
-		return this.transcribe({
-			notePath: note.path,
-			tagsToRemove: settings.transcribeTagged && settings.removeTagsAfter ? settings.tags : [],
-		});
+		return this.transcribe({ notePath: note.path, rules: this.store.settings.rules });
 	}
 
 	private rulesOptions(): JobOptions {
-		const settings = this.store.settings;
-		const folder = settings.folder.trim();
-		return {
-			tagged: settings.transcribeTagged
-				? { folders: folder ? [folder] : [], tags: settings.tags, removeTagsAfter: settings.removeTagsAfter }
-				: undefined,
-			dailyNotesFrom: settings.transcribeDailyNotes ? settings.dailyNotesFrom : undefined,
-		};
+		return { rules: this.store.settings.rules };
 	}
 
 	private async transcribe(options: JobOptions): Promise<void> {

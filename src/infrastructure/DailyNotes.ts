@@ -1,24 +1,30 @@
-/** Turns a note's base name into a YYYY-MM-DD day, or undefined when the name is not a date. */
-export type DateParser = (basename: string) => string | undefined;
+import { DatedNote } from "../domain/ports";
 
-/** Daily notes live directly in one folder and are named by a date; the day order is the ISO string order. */
+/** Turns a note's path below the daily notes folder, without extension, into a YYYY-MM-DD day, or undefined when it is not a date. */
+export type DateParser = (relativePath: string) => string | undefined;
+
+/** Daily notes live in one folder and are named by a date format, which may contain slashes. */
 export class DailyNotes {
-	constructor(
-		private readonly folder: string,
-		private readonly parse: DateParser,
-	) {}
+	private readonly prefix: string;
 
-	datedFrom(fromDate: string, paths: readonly string[]): string[] {
-		return paths.filter((path) => {
+	constructor(
+		folder: string,
+		private readonly parse: DateParser,
+	) {
+		const normalized = folder.normalize("NFC");
+		this.prefix = normalized ? `${normalized}/` : "";
+	}
+
+	dated(paths: readonly string[]): DatedNote[] {
+		return paths.flatMap((path) => {
 			const day = this.dayOf(path);
-			return day !== undefined && day >= fromDate;
+			return day === undefined ? [] : [{ path, day }];
 		});
 	}
 
 	private dayOf(path: string): string | undefined {
-		const slash = path.lastIndexOf("/");
-		const folder = slash < 0 ? "" : path.slice(0, slash);
-		if (folder !== this.folder) return undefined;
-		return this.parse(path.slice(slash + 1).replace(/\.md$/, ""));
+		const normalized = path.normalize("NFC");
+		if (!normalized.endsWith(".md") || !normalized.startsWith(this.prefix)) return undefined;
+		return this.parse(normalized.slice(this.prefix.length, -".md".length));
 	}
 }

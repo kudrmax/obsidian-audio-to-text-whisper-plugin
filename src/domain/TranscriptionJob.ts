@@ -1,7 +1,5 @@
-import { AllAudioLines } from "./AllAudioLines";
-import { AudioLines } from "./AudioLines";
+import { AudioLines, LineRule } from "./AudioLines";
 import { InlineTags } from "./InlineTags";
-import { TaggedAudioLines } from "./TaggedAudioLines";
 import {
 	AudioDurations,
 	AudioEmbed,
@@ -13,25 +11,20 @@ import {
 	TranscriptionTask,
 	VaultGateway,
 } from "./ports";
+import { TranscriptionRule, ValidRule } from "./TranscriptionRule";
 
-export interface TagRule {
-	readonly folders: readonly string[];
-	readonly tags: readonly string[];
-	readonly removeTagsAfter: boolean;
-}
-
-/** At least one rule is required; a note matched by both is processed once, with every audio in it. */
+/** Audio the rules select across the vault. */
 export interface RuleOptions {
-	readonly tagged?: TagRule;
-	/** Daily notes dated on or after this day (YYYY-MM-DD) are processed whole, no tag needed. */
-	readonly dailyNotesFrom?: string;
+	readonly rules: readonly TranscriptionRule[];
 }
 
-/** Only this note is processed, every audio in it, no tag needed; no other note is read for selection or edited. */
+/**
+ * Only this note is processed, every audio in it, no tag needed; no other note is read for selection or edited.
+ * The rules only decide which tags leave its transcribed lines; invalid rules are ignored here.
+ */
 export interface SingleNoteOptions {
 	readonly notePath: string;
-	/** Tags removed from the transcribed lines. */
-	readonly tagsToRemove: readonly string[];
+	readonly rules: readonly TranscriptionRule[];
 }
 
 export type JobOptions = RuleOptions | SingleNoteOptions;
@@ -40,12 +33,10 @@ interface PlannedTask extends TranscriptionTask {
 	readonly lines: AudioLines;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 class CancelledError extends Error {}
 
 /**
- * Audio is selected by a tag on its line and/or by the date of the daily note it stands in.
+ * Audio is selected by rules: a folder or daily-note scope, and optionally a tag on the audio's line.
  * References standing side by side are parts of one recording and become one text.
  * Per-audio order is what makes a run safe to interrupt at any point:
  * transcribe → journal the pending deletion → replace embed in note → trash orphaned audio → clear journal.
@@ -64,8 +55,9 @@ export class TranscriptionJob {
 
 	async run(options: JobOptions, signal: AbortSignal): Promise<JobReport> {
 		const onlyNote = "notePath" in options ? options.notePath : undefined;
+		const linesByNote = onlyNote === undefined ? this.matchedNotes(options.rules) : await this.singleNote(onlyNote, options.rules);
 		const recoveredDeletions = await this.completePendingDeletions(onlyNote);
-		const tasks = await this.withDurations(await this.plan(options));
+		const tasks = await this.withDurations(await this.plan(linesByNote));
 		const failures: TaskFailure[] = [];
 		let done = 0;
 		let cancelled = false;
@@ -98,13 +90,13 @@ export class TranscriptionJob {
 		return report;
 	}
 
-	private async plan(options: JobOptions): Promise<PlannedTask[]> {
-		const linesByNote = "notePath" in options ? await this.singleNote(options) : this.matchedNotes(options);
+	private async plan(linesByNote: Map<string, readonly LineRule[]>): Promise<PlannedTask[]> {
 		const tasks: PlannedTask[] = [];
-		for (const [notePath, lines] of linesByNote) {
+		for (const [notePath, rules] of linesByNote) {
 			const content = (await this.vault.readNote(notePath)) ?? "";
+			const lines = new AudioLines(rules, this.vault.findAudioEmbeds(notePath));
 			const seen = new Set<string>();
-			for (const embeds of lines.groups(content, this.vault.findAudioEmbeds(notePath))) {
+			for (const embeds of lines.groups(content)) {
 				const key = linkTexts(embeds).join("\n");
 				if (seen.has(key)) continue;
 				seen.add(key);
@@ -114,53 +106,52 @@ export class TranscriptionJob {
 		return tasks;
 	}
 
-	private async singleNote(options: SingleNoteOptions): Promise<Map<string, AudioLines>> {
-		if ((await this.vault.readNote(options.notePath)) === undefined) {
-			throw new Error(`note not found: ${options.notePath}`);
+	private async singleNote(notePath: string, rules: readonly TranscriptionRule[]): Promise<Map<string, LineRule[]>> {
+		if ((await this.vault.readNote(notePath)) === undefined) {
+			throw new Error(`note not found: ${notePath}`);
 		}
-		const tags = new InlineTags(options.tagsToRemove);
-		return new Map([[options.notePath, new AllAudioLines(tags.isEmpty ? undefined : tags)]]);
+		const valid = rules.flatMap((rule, index) => {
+			try {
+				return [ValidRule.parse(rule, index + 1)];
+			} catch {
+				return [];
+			}
+		});
+		const days = this.daysOrNone(valid);
+		const names = valid
+			.filter((rule) => rule.covers(notePath, days))
+			.flatMap((rule) => rule.removedTags?.names ?? []);
+		const tags = new InlineTags(names);
+		return new Map([[notePath, [{ tagsToRemove: tags.isEmpty ? undefined : tags }]]]);
 	}
 
-	/** Which notes the rules select and, per note, which of their audio lines. The date rule covers a note whole, so it wins. */
-	private matchedNotes(options: RuleOptions): Map<string, AudioLines> {
-		if (!options.tagged && options.dailyNotesFrom === undefined) {
-			throw new Error("nothing to transcribe: turn on By tag or By daily note date in settings");
+	/** Which notes the rules select and, per note, the rules that cover it. Every rule is checked before anything is read. */
+	private matchedNotes(rules: readonly TranscriptionRule[]): Map<string, LineRule[]> {
+		if (rules.length === 0) {
+			throw new Error("nothing to transcribe: add a rule in the plugin settings");
 		}
-		const linesByNote = new Map<string, AudioLines>();
-		const tags = options.tagged && this.tagsOf(options.tagged);
-		if (options.tagged && tags) {
-			const lines = new TaggedAudioLines(tags, options.tagged.removeTagsAfter);
-			for (const notePath of this.vault.findNotes(options.tagged.folders, options.tagged.tags)) {
-				linesByNote.set(notePath, lines);
-			}
-		}
-		if (options.dailyNotesFrom !== undefined) {
-			const tagsToRemove = options.tagged?.removeTagsAfter ? tags : undefined;
-			const lines = new AllAudioLines(tagsToRemove);
-			for (const notePath of this.vault.findDailyNotes(this.validDate(options.dailyNotesFrom))) {
-				linesByNote.set(notePath, lines);
-			}
+		const valid = rules.map((rule, index) => ValidRule.parse(rule, index + 1));
+		const days = valid.some((rule) => rule.needsDailyNotes) ? this.days() : new Map<string, string>();
+		const linesByNote = new Map<string, LineRule[]>();
+		for (const notePath of this.vault.listNotes()) {
+			const covering = valid.filter((rule) => rule.covers(notePath, days));
+			if (covering.length > 0) linesByNote.set(notePath, covering.map((rule) => rule.lineRule));
 		}
 		return linesByNote;
 	}
 
-	private tagsOf(rule: TagRule): InlineTags {
-		if (rule.folders.length === 0) {
-			throw new Error("no folder configured to search for tagged audio");
-		}
-		const tags = new InlineTags(rule.tags);
-		if (tags.isEmpty) {
-			throw new Error("no tag configured: By tag transcribes only audio marked with a tag");
-		}
-		return tags;
+	private days(): Map<string, string> {
+		return new Map(this.vault.dailyNotes().map((note) => [note.path, note.day]));
 	}
 
-	private validDate(date: string): string {
-		if (!ISO_DATE.test(date) || Number.isNaN(Date.parse(date))) {
-			throw new Error(`"${date}" is not a date in the YYYY-MM-DD form`);
+	/** For the current note only: daily rules are skipped when daily notes are not set up. */
+	private daysOrNone(rules: readonly ValidRule[]): Map<string, string> {
+		if (!rules.some((rule) => rule.needsDailyNotes)) return new Map();
+		try {
+			return this.days();
+		} catch {
+			return new Map();
 		}
-		return date;
 	}
 
 	private async withDurations(tasks: PlannedTask[]): Promise<PlannedTask[]> {
@@ -218,10 +209,11 @@ export class TranscriptionJob {
 		signal: AbortSignal,
 		onProgress: (fraction: number) => void,
 	): Promise<string> {
+		const parts = [...new Set(embeds.map((embed) => embed.audioPath))];
 		const texts: string[] = [];
-		for (const [index, { audioPath }] of embeds.entries()) {
+		for (const [index, audioPath] of parts.entries()) {
 			if (signal.aborted) throw new CancelledError();
-			texts.push(await this.transcriptOf(audioPath, signal, (fraction) => onProgress((index + fraction) / embeds.length)));
+			texts.push(await this.transcriptOf(audioPath, signal, (fraction) => onProgress((index + fraction) / parts.length)));
 		}
 		const text = texts.filter((part) => part.length > 0).join(" ");
 		if (text.length === 0) {

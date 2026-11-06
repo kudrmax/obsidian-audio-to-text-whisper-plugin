@@ -1,13 +1,10 @@
+import { TranscriptionRule } from "./domain/TranscriptionRule";
+
 export type WhisperEngine = "whisper.cpp" | "openai-whisper";
 
 export interface TranscriberSettings {
-	transcribeTagged: boolean;
-	folder: string;
-	tags: string[];
-	removeTagsAfter: boolean;
-	transcribeDailyNotes: boolean;
-	/** YYYY-MM-DD; daily notes on or after this day are transcribed whole. */
-	dailyNotesFrom: string;
+	/** Rules combine with OR: audio matching any of them is transcribed. Empty until the user adds one. */
+	rules: TranscriptionRule[];
 	engine: WhisperEngine;
 	whisperPath: string;
 	ffmpegPath: string;
@@ -16,13 +13,17 @@ export interface TranscriberSettings {
 	language: string;
 }
 
-export const DEFAULT_SETTINGS: TranscriberSettings = {
-	transcribeTagged: true,
-	folder: "",
+export const NEW_RULE: TranscriptionRule = {
+	scope: "folders",
+	folders: [""],
+	fromDate: "",
+	onlyTagged: true,
 	tags: ["transcribe"],
 	removeTagsAfter: true,
-	transcribeDailyNotes: false,
-	dailyNotesFrom: "",
+};
+
+export const DEFAULT_SETTINGS: Readonly<TranscriberSettings> = {
+	rules: [],
 	engine: "whisper.cpp",
 	whisperPath: "",
 	ffmpegPath: "",

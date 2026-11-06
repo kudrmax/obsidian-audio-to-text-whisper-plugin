@@ -14,17 +14,18 @@ export interface DataPersistence {
 }
 
 export class PluginStore implements DeletionJournal {
-	private data: PersistedData = { settings: { ...DEFAULT_SETTINGS }, pendingDeletions: [], speeds: {} };
+	private data: PersistedData = { settings: structuredClone(DEFAULT_SETTINGS) as TranscriberSettings, pendingDeletions: [], speeds: {} };
 
 	constructor(private readonly persistence: DataPersistence) {}
 
 	async load(): Promise<void> {
 		const raw = ((await this.persistence.loadData()) ?? {}) as Partial<PersistedData>;
 		const stored = (raw.settings ?? {}) as Partial<TranscriberSettings>;
-		const settings = { ...DEFAULT_SETTINGS };
+		const settings = structuredClone(DEFAULT_SETTINGS) as TranscriberSettings;
 		for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof TranscriberSettings)[]) {
-			if (stored[key] !== undefined) (settings as Record<string, unknown>)[key] = stored[key];
+			if (stored[key] !== undefined) (settings as unknown as Record<string, unknown>)[key] = stored[key];
 		}
+		if (!Array.isArray(settings.rules)) settings.rules = [];
 		this.data = { settings, pendingDeletions: raw.pendingDeletions ?? [], speeds: raw.speeds ?? {} };
 	}
 
