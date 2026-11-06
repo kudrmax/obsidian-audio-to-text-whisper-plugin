@@ -43,13 +43,15 @@ describe("Transcription rules", () => {
 
 	const transcribed = () => transcriber.calls.map((path) => path.split("/").pop()!.replace(".m4a", "")).sort();
 
-	/** Every note without transcribed audio is byte-for-byte unchanged and nothing else is trashed. */
+	/** Exactly these audio are transcribed and trashed; every note equals its original with just their references replaced. */
 	const expectOnly = (names: string[]) => {
 		expect(transcribed()).toEqual([...names].sort());
 		expect(vault.trashed.map((p) => p.split("/").pop()!.replace(".m4a", "")).sort()).toEqual([...names].sort());
 		for (const [path, content] of original) {
-			const touched = names.some((name) => content.includes(`[[${name}.m4a]]`));
-			if (!touched) expect(vault.content(path), path).toBe(content);
+			const expected = content.replace(/!?\[\[([^\]|]+)\.m4a(?:\|[^\]]*)?\]\]/g, (reference, name: string) =>
+				names.includes(name) ? `text of ${name}` : reference,
+			);
+			expect(vault.content(path), path).toBe(expected);
 		}
 	};
 
@@ -263,9 +265,7 @@ describe("Transcription rules", () => {
 			addNote("Other/fm2.md", content);
 			await run([folders(["Other"])]);
 			expect(vault.content("Other/fm2.md")).toBe(content.replace("![[body.m4a]]", "text of body"));
-			expect(transcribed()).not.toContain("fm2");
-			expect(transcribed()).not.toContain("code");
-			expect(transcribed()).not.toContain("code2");
+			expectOnly(["o-t", "o-u", "o-v", "body"]);
 		});
 
 		it("F12 a folder name is case-sensitive", async () => {

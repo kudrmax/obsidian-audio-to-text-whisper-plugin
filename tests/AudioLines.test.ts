@@ -112,6 +112,19 @@ describe("AudioLines", () => {
 		expect(every.groups("> ```\n> ![[a.m4a]]\n> ```\n![[b.m4a]]")).toEqual([[b]]);
 	});
 
+	it("hides code spans of several backticks and a %% inside them", () => {
+		expect(every.groups("``x ![[a.m4a]] y``")).toEqual([]);
+		expect(every.replace("``x ![[a.m4a]] y``\n![[a.m4a]]", ["![[a.m4a]]"], "T")).toBe("``x ![[a.m4a]] y``\nT");
+		expect(tagged.groups("![[a.m4a]] ``#transcribe``")).toEqual([]);
+		expect(every.groups("``%%`` text\n%% ![[b.m4a]] %%")).toEqual([]);
+		expect(every.groups("```![[a.m4a]]```\n![[b.m4a]]")).toEqual([[b]]);
+	});
+
+	it("hides a code span across lines but not across a blank line", () => {
+		expect(every.groups("`a\n![[a.m4a]]\nb`")).toEqual([]);
+		expect(every.groups("`a\n\n![[a.m4a]]\n\nb`")).toEqual([[a]]);
+	});
+
 	it("removes a tag that directly follows a code span", () => {
 		expect(tagged.replace("![[a.m4a]] `x`#transcribe", ["![[a.m4a]]"], "T")).toBe("T `x`");
 	});

@@ -1,7 +1,8 @@
-const FENCE_OPEN = /^\s*(?:>\s*)*(`{3,}|~{3,})/;
+const FENCE_OPEN = /^\s*(?:>\s*)*(`{3,}(?=[^`]*$)|~{3,})/;
 const FENCE_CLOSE = /^\s*(?:>\s*)*(`{3,}|~{3,})\s*$/;
 const COMMENTS = [/%%[\s\S]*?(?:%%|$)/g, /<!--[\s\S]*?(?:-->|$)/g];
-const INLINE_CODE = /`[^`\n]*`/g;
+/** A code span closes with a backtick string of the same length and never crosses a blank line. */
+const INLINE_CODE = /(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
 const LINKS = [/!?\[\[[^\]\n]*\]\]/g, /\[[^\]\n]*\]\([^)\n]*\)/g];
 
 /**
